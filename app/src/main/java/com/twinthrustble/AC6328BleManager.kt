@@ -11,25 +11,33 @@ import java.util.UUID
 /**
  * AC6328 / AC6329C BLE motor controller.
  *
- * Both ESC and BLDC modes use the same 50Hz PWM timer.
- * Duty units are timer counts, NOT microseconds:
+ * Each BLE module drives TWO motors. Commands are sent as separate 3-byte packets,
+ * one per motor:
  *
- *   ESC mode  (CMD_ESC_PWM  0x01): duty 500–1000
- *     500 = 1000µs (stop/arm)
- *     750 = 1500µs (mid)
- *    1000 = 2000µs (full)
+ *   Motor 1 (front):  [0x01, dutyLo, dutyHi]
+ *   Motor 2 (rear):   [0x02, dutyLo, dutyHi]
  *
- *   BLDC mode (CMD_BLDC_DUTY 0x02): duty 0–10000
- *     0     = 0%  (stop)
- *    10000  = 100% (full)
+ * Duty units are timer counts (little-endian 16-bit), NOT microseconds:
+ *
+ *   ESC mode  (0x01 / 0x02): duty 500–1000
+ *     500  = 1000µs (stop / arm)
+ *     750  = 1500µs (mid)
+ *     1000 = 2000µs (full throttle)
+ *
+ *   BLDC mode (0x01 / 0x02): duty 0–10000
+ *     0     = 0%   (stop)
+ *     10000 = 100% (full)
+ *
+ * Stop command: [0xFF, 0x00, 0x00] — stops both motors immediately.
  *
  * Service: ae00
- *   ae03 WRITE_WITHOUT_RESPONSE — 5-byte command packet
+ *   ae03 WRITE_WITHOUT_RESPONSE — 3-byte motor command packets
  *   ae02 NOTIFY                 — echo / CASIC GNSS stream
- *   ae10 READ|WRITE             — status read / mode switch write
+ *   ae10 READ | WRITE           — status read / mode switch write
  *
- * Packet format (ae03, 5 bytes):
- *   [CMD, portLo, portHi, stbdLo, stbdHi]  little-endian 16-bit values
+ * Mode switch (ae10 WRITE):
+ *   0x01 → ESC mode
+ *   0x02 → BLDC mode
  */
 class AC6328BleManager(context: Context) : BleManager(context) {
 
@@ -41,35 +49,29 @@ class AC6328BleManager(context: Context) : BleManager(context) {
         val CHAR_AE02_UUID = UUID.fromString("0000ae02-0000-1000-8000-00805f9b34fb")
         val CHAR_AE10_UUID = UUID.fromString("0000ae10-0000-1000-8000-00805f9b34fb")
 
-        const val CMD_ESC_PWM:   Byte = 0x01
-        const val CMD_BLDC_DUTY: Byte = 0x02
-        const val CMD_STOP:      Byte = 0xFF.toByte()
+        // Per-motor command bytes
+        const val CMD_M1:   Byte = 0x01   // Motor 1 (front)
+        const val CMD_M2:   Byte = 0x02   // Motor 2 (rear)
+        const val CMD_STOP: Byte = 0xFF.toByte()
 
-        // ESC duty range — 50Hz timer, same units as BLDC but narrower band
-        // duty 500 = 1000µs (stop), duty 1000 = 2000µs (full throttle)
-        const val ESC_MIN     = 500
-        const val ESC_DEFAULT = 500   // stop / arm value
-        const val ESC_MAX     = 1000
+        // ESC duty range
+        const val ESC_MIN     = 500    // 1000µs — stop / arm
+        const val ESC_DEFAULT = 500
+        const val ESC_MAX     = 1000   // 2000µs — full throttle
 
-        // BLDC duty range — 0=stop, 10000=100%
+        // BLDC duty range
         const val BLDC_MIN     = 0
         const val BLDC_DEFAULT = 0
         const val BLDC_MAX     = 10000
     }
 
-    // ── Characteristics ───────────────────────────────────────────────────────
-
     private var charAe03: BluetoothGattCharacteristic? = null
     private var charAe02: BluetoothGattCharacteristic? = null
     private var charAe10: BluetoothGattCharacteristic? = null
 
-    // ── Callbacks ─────────────────────────────────────────────────────────────
-
     var onFeedback: ((FeedbackData) -> Unit)? = null
     var onAe02Raw:  ((ByteArray)    -> Unit)? = null
     var onError:    ((String)       -> Unit)? = null
-
-    // ── Nordic BleManager overrides ───────────────────────────────────────────
 
     override fun getGattCallback(): BleManagerGattCallback = AC6328GattCallback()
 
@@ -103,40 +105,57 @@ class AC6328BleManager(context: Context) : BleManager(context) {
     // ── Commands ──────────────────────────────────────────────────────────────
 
     /**
-     * Send ESC duty command.
-     * duty: 500–1000  (500=stop/1000µs, 1000=full/2000µs)
+     * Send ESC PWM duty to both motors on this module.
+     * Sends two separate 3-byte packets: [0x01, m1Lo, m1Hi] then [0x02, m2Lo, m2Hi]
+     * duty range: 500 (stop/1000µs) – 1000 (full/2000µs)
      */
-    fun sendEscPwm(portDuty: Int, stbdDuty: Int) {
-        val p = portDuty.coerceIn(ESC_MIN, ESC_MAX)
-        val s = stbdDuty.coerceIn(ESC_MIN, ESC_MAX)
-        Log.d(TAG, "ESC duty port=$p stbd=$s  (${dutyToUs(p)}µs / ${dutyToUs(s)}µs)")
-        writeCommand(buildPacket(CMD_ESC_PWM, p, s))
+    fun sendEscPwm(m1Duty: Int, m2Duty: Int) {
+        val m1 = m1Duty.coerceIn(ESC_MIN, ESC_MAX)
+        val m2 = m2Duty.coerceIn(ESC_MIN, ESC_MAX)
+        Log.d(TAG, "ESC m1=$m1 (${dutyToUs(m1)}µs)  m2=$m2 (${dutyToUs(m2)}µs)")
+        writeCommand(buildPacket(CMD_M1, m1))
+        writeCommand(buildPacket(CMD_M2, m2))
     }
 
     /**
-     * Send BLDC duty command.
-     * duty: 0–10000  (0=stop, 10000=100%)
+     * Send BLDC duty to both motors on this module.
+     * Sends two separate 3-byte packets: [0x01, m1Lo, m1Hi] then [0x02, m2Lo, m2Hi]
+     * duty range: 0 (stop) – 10000 (100%)
      */
-    fun sendBldc(portDuty: Int, stbdDuty: Int) {
-        val p = portDuty.coerceIn(BLDC_MIN, BLDC_MAX)
-        val s = stbdDuty.coerceIn(BLDC_MIN, BLDC_MAX)
-        Log.d(TAG, "BLDC duty port=$p stbd=$s")
-        writeCommand(buildPacket(CMD_BLDC_DUTY, p, s))
+    fun sendBldc(m1Duty: Int, m2Duty: Int) {
+        val m1 = m1Duty.coerceIn(BLDC_MIN, BLDC_MAX)
+        val m2 = m2Duty.coerceIn(BLDC_MIN, BLDC_MAX)
+        Log.d(TAG, "BLDC m1=$m1  m2=$m2")
+        writeCommand(buildPacket(CMD_M1, m1))
+        writeCommand(buildPacket(CMD_M2, m2))
     }
 
-    /** Stop both motors immediately — sends CMD_STOP (0xFF) */
+    /**
+     * Stop both motors — sends CMD_STOP [0xFF, 0x00, 0x00].
+     * One stop packet covers both motors.
+     */
     fun stopMotors() {
         Log.d(TAG, "STOP sent")
-        writeCommand(buildPacket(CMD_STOP, 0, 0))
+        writeCommand(buildPacket(CMD_STOP, 0))
     }
 
-    /** Switch firmware to ESC mode */
-    fun setEscMode()  { charAe10?.let { writeCharacteristic(it, byteArrayOf(0x01), BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT).enqueue() } }
+    /** Switch firmware to ESC mode (write 0x01 to ae10) */
+    fun setEscMode() {
+        charAe10?.let {
+            writeCharacteristic(it, byteArrayOf(0x01),
+                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT).enqueue()
+        }
+    }
 
-    /** Switch firmware to BLDC mode */
-    fun setBldcMode() { charAe10?.let { writeCharacteristic(it, byteArrayOf(0x02), BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT).enqueue() } }
+    /** Switch firmware to BLDC mode (write 0x02 to ae10) */
+    fun setBldcMode() {
+        charAe10?.let {
+            writeCharacteristic(it, byteArrayOf(0x02),
+                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT).enqueue()
+        }
+    }
 
-    /** Read ae10 status: "M<mode>A<vbat_mv>T<uptime_min>" */
+    /** Read ae10 status string: "M<mode>A<vbat_mv>T<uptime_min>" */
     fun readStatus() {
         charAe10?.let {
             readCharacteristic(it).with { _, data ->
@@ -146,7 +165,7 @@ class AC6328BleManager(context: Context) : BleManager(context) {
         }
     }
 
-    /** Arm ESC: send stop duty so ESC completes its arm sequence */
+    /** Arm ESC: send stop duty on both motors to complete the ESC arm sequence */
     fun armEsc() = sendEscPwm(ESC_MIN, ESC_MIN)
 
     // ── Battery helper ────────────────────────────────────────────────────────
@@ -161,38 +180,47 @@ class AC6328BleManager(context: Context) : BleManager(context) {
 
     // ── Packet builder ────────────────────────────────────────────────────────
 
-    private fun buildPacket(cmd: Byte, port: Int, stbd: Int): ByteArray = byteArrayOf(
+    /**
+     * Build a 3-byte command packet: [cmd, dutyLo, dutyHi]
+     * duty is a little-endian 16-bit value.
+     */
+    private fun buildPacket(cmd: Byte, duty: Int): ByteArray = byteArrayOf(
         cmd,
-        (port and 0xFF).toByte(), ((port shr 8) and 0xFF).toByte(),
-        (stbd and 0xFF).toByte(), ((stbd shr 8) and 0xFF).toByte()
+        (duty and 0xFF).toByte(),
+        ((duty shr 8) and 0xFF).toByte()
     )
 
     private fun writeCommand(bytes: ByteArray) {
         charAe03?.let {
-            writeCharacteristic(it, bytes, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE).enqueue()
+            writeCharacteristic(it, bytes,
+                BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE).enqueue()
         }
     }
 
     // ── ae02 echo parser ──────────────────────────────────────────────────────
 
     private fun parseAe02Echo(bytes: ByteArray) {
-        if (bytes.size < 5) return
-        val cmd      = bytes[0]
-        val portVal  = (bytes[1].toInt() and 0xFF) or ((bytes[2].toInt() and 0xFF) shl 8)
-        val stbdVal  = (bytes[3].toInt() and 0xFF) or ((bytes[4].toInt() and 0xFF) shl 8)
+        if (bytes.size < 3) return
+        val cmd  = bytes[0]
+        val duty = (bytes[1].toInt() and 0xFF) or ((bytes[2].toInt() and 0xFF) shl 8)
+        // For backward compat, map CMD_M1 echo to echoPort, CMD_M2 to echoStbd
+        val (ep, es) = when (cmd) {
+            CMD_M1 -> Pair(duty, -1)
+            CMD_M2 -> Pair(-1, duty)
+            else   -> Pair(-1, -1)
+        }
         onFeedback?.invoke(FeedbackData(
-            source    = "ae02-echo",
-            echoCmd   = cmd.toInt() and 0xFF,
-            echoPort  = portVal,
-            echoStbd  = stbdVal,
-            rawAe02   = bytes
+            source   = "ae02-echo",
+            echoCmd  = cmd.toInt() and 0xFF,
+            echoPort = ep,
+            echoStbd = es,
+            rawAe02  = bytes
         ))
     }
 
     // ── ae10 status parser ────────────────────────────────────────────────────
 
     private fun parseAe10Status(raw: String): FeedbackData {
-        // Format: "M<mode>A<vbat_mv>T<uptime_min>"
         val mode      = Regex("M(\\d+)").find(raw)?.groupValues?.get(1)?.toIntOrNull() ?: 0
         val battMv    = Regex("A(\\d+)").find(raw)?.groupValues?.get(1)?.toIntOrNull() ?: 0
         val uptimeMin = Regex("T(\\d+)").find(raw)?.groupValues?.get(1)?.toIntOrNull() ?: -1
@@ -209,18 +237,18 @@ class AC6328BleManager(context: Context) : BleManager(context) {
     // ── Feedback data ─────────────────────────────────────────────────────────
 
     data class FeedbackData(
-        val source:    String   = "",
-        val batteryMv: Int      = 0,
-        val uptimeMin: Int      = -1,
-        val rawAe10:   String   = "",
-        val echoCmd:   Int      = -1,
-        val echoPort:  Int      = -1,
-        val echoStbd:  Int      = -1,
+        val source:    String    = "",
+        val batteryMv: Int       = 0,
+        val uptimeMin: Int       = -1,
+        val rawAe10:   String    = "",
+        val echoCmd:   Int       = -1,
+        val echoPort:  Int       = -1,
+        val echoStbd:  Int       = -1,
         val rawAe02:   ByteArray = ByteArray(0)
     )
 
     // ── Utility ───────────────────────────────────────────────────────────────
 
-    /** Convert ESC duty unit to microseconds for display */
-    fun dutyToUs(duty: Int): Int = duty * 2   // 50Hz: period=20000µs, 1 duty unit = 20000/10000 = 2µs
+    /** Convert ESC duty unit to microseconds for display (50Hz timer: 1 unit = 2µs) */
+    fun dutyToUs(duty: Int): Int = duty * 2
 }
