@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Root is ScrollView so the Clear buttons are never clipped -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="#121212" android:fillViewport="true">
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="12dp">
+
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="TwinThrustBLE" android:textSize="22sp" android:textStyle="bold"
+            android:textColor="#FFFFFF" android:gravity="center" android:paddingBottom="2dp"/>
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="Dual-BLE 4-Motor Controller" android:textSize="11sp"
+            android:textColor="#888888" android:gravity="center" android:paddingBottom="8dp"/>
+
+        <!-- SAVED ASSIGNMENTS -->
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="SAVED ASSIGNMENTS" android:textColor="#666666"
+            android:textSize="10sp" android:paddingBottom="3dp"/>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:layout_marginBottom="5dp">
+
+            <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content" android:orientation="vertical"
+                android:background="#1A2A1A" android:padding="8dp" android:layout_marginEnd="4dp">
+                <TextView android:id="@+id/tvPortSaved" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:text="PORT (not assigned)"
+                    android:textColor="#66FF66" android:textSize="10sp" android:paddingBottom="6dp"/>
+                <!-- minHeight so button never gets clipped even when 3-line text pushes it -->
+                <Button android:id="@+id/btnClearPort" android:layout_width="match_parent"
+                    android:layout_height="36dp" android:text="Clear" android:textSize="11sp"
+                    android:backgroundTint="#883333" android:visibility="gone"/>
+            </LinearLayout>
+
+            <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content" android:orientation="vertical"
+                android:background="#1A1A2A" android:padding="8dp" android:layout_marginStart="4dp">
+                <TextView android:id="@+id/tvStbdSaved" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:text="STBD (not assigned)"
+                    android:textColor="#6699FF" android:textSize="10sp" android:paddingBottom="6dp"/>
+                <Button android:id="@+id/btnClearStbd" android:layout_width="match_parent"
+                    android:layout_height="36dp" android:text="Clear" android:textSize="11sp"
+                    android:backgroundTint="#883333" android:visibility="gone"/>
+            </LinearLayout>
+        </LinearLayout>
+
+        <TextView android:id="@+id/tvBothHint" android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Scan and connect each BLE module to assign Port and Starboard."
+            android:textColor="#AAAAAA" android:textSize="11sp" android:paddingBottom="5dp"/>
+
+        <Button android:id="@+id/btnConnectBoth" android:layout_width="match_parent"
+            android:layout_height="48dp" android:text="CONNECT BOTH &amp; LAUNCH"
+            android:textStyle="bold" android:textSize="14sp" android:backgroundTint="#006622"
+            android:enabled="false" android:alpha="0.4" android:layout_marginBottom="10dp"/>
+
+        <View android:layout_width="match_parent" android:layout_height="1dp"
+            android:background="#2A2A2A" android:layout_marginBottom="8dp"/>
+
+        <!-- SCAN -->
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="CONNECT A MODULE" android:textColor="#666666"
+            android:textSize="10sp" android:paddingBottom="4dp"/>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical"
+            android:layout_marginBottom="5dp">
+            <Button android:id="@+id/btnScan" android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="40dp" android:text="Scan for BLE Modules"
+                android:backgroundTint="#1565C0" android:textSize="13sp"/>
+            <ProgressBar android:id="@+id/progressBar" android:layout_width="28dp"
+                android:layout_height="28dp" android:layout_marginStart="8dp"
+                android:visibility="gone" android:indeterminateTint="#2196F3"/>
+        </LinearLayout>
+
+        <!-- Filter chip -->
+        <com.google.android.material.chip.Chip
+            android:id="@+id/chipShowAll"
+            android:layout_width="wrap_content" android:layout_height="32dp"
+            android:text="Show all devices (not only ESC_PWM / BLDC_PWM)"
+            android:textSize="11sp"
+            style="@style/Widget.MaterialComponents.Chip.Filter"
+            android:layout_marginBottom="6dp"/>
+
+        <!-- Device list — minHeight so there is always visible space -->
+        <androidx.recyclerview.widget.RecyclerView android:id="@+id/recyclerView"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:minHeight="200dp"
+            android:clipToPadding="false" android:paddingTop="2dp"/>
+
+    </LinearLayout>
+</ScrollView>

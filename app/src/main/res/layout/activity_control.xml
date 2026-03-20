@@ -1,0 +1,573 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="#121212"
+    android:fillViewport="true">
+
+  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+      android:orientation="vertical" android:padding="10dp">
+
+    <!-- ══ TOP BAR ══ -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:background="#1C1C1C" android:padding="8dp"
+        android:gravity="center_vertical" android:layout_marginBottom="6dp">
+
+      <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+          android:layout_height="wrap_content" android:orientation="vertical">
+        <TextView android:id="@+id/tvPortLabel" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="PORT"
+            android:textColor="#66FF66" android:textSize="11sp" android:textStyle="bold"/>
+        <TextView android:id="@+id/tvPortStatus" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="Connecting..."
+            android:textColor="#FF6666" android:textSize="10sp"/>
+        <TextView android:id="@+id/tvPortBatt" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text=""
+            android:textColor="#AAAAAA" android:textSize="10sp"/>
+      </LinearLayout>
+
+      <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+          android:orientation="horizontal" android:gravity="center_vertical"
+          android:paddingHorizontal="6dp">
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="BLDC" android:textColor="#888888" android:textSize="10sp"
+            android:paddingEnd="2dp"/>
+        <androidx.appcompat.widget.SwitchCompat android:id="@+id/switchMode"
+            android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+        <TextView android:id="@+id/tvModeLabel" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="ESC"
+            android:textColor="#888888" android:textSize="10sp" android:paddingStart="2dp"/>
+      </LinearLayout>
+
+      <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+          android:layout_height="wrap_content" android:orientation="vertical"
+          android:gravity="end">
+        <TextView android:id="@+id/tvStbdLabel" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="STBD"
+            android:textColor="#6699FF" android:textSize="11sp" android:textStyle="bold"/>
+        <TextView android:id="@+id/tvStbdStatus" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="Connecting..."
+            android:textColor="#FF6666" android:textSize="10sp"/>
+        <TextView android:id="@+id/tvStbdBatt" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text=""
+            android:textColor="#AAAAAA" android:textSize="10sp"/>
+      </LinearLayout>
+    </LinearLayout>
+
+    <!-- ══ GPS ROW ══
+         fillViewport=true + ScrollView means the GPS row won't get clipped.
+         btn km/h sits ABOVE the speed number so it can never be cut off. -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:background="#0D0D0D"
+        android:gravity="center_vertical" android:paddingVertical="8dp"
+        android:layout_marginBottom="6dp">
+
+      <!-- Left: fix + heading -->
+      <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+          android:layout_height="wrap_content" android:orientation="vertical"
+          android:paddingStart="8dp">
+        <TextView android:id="@+id/tvGpsFix" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="No Fix"
+            android:textColor="#888888" android:textSize="11sp"/>
+        <TextView android:id="@+id/tvGpsHeading" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="&#8212;"
+            android:textColor="#888888" android:textSize="11sp"/>
+      </LinearLayout>
+
+      <!-- Centre: unit toggle button ON TOP, then big number -->
+      <LinearLayout android:layout_width="0dp" android:layout_weight="2"
+          android:layout_height="wrap_content" android:orientation="vertical"
+          android:gravity="center">
+        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical"
+            android:layout_marginBottom="2dp">
+          <TextView android:id="@+id/tvSpeedUnit" android:layout_width="wrap_content"
+              android:layout_height="wrap_content" android:text="km/h"
+              android:textSize="14sp" android:textColor="#0099BB" android:paddingEnd="6dp"/>
+          <!-- Fixed height + minWidth so it never clips -->
+          <Button android:id="@+id/btnSpeedUnit" android:layout_width="wrap_content"
+              android:layout_height="36dp" android:minWidth="56dp"
+              android:text="km/h" android:textSize="11sp"
+              android:backgroundTint="#333333"/>
+        </LinearLayout>
+        <TextView android:id="@+id/tvSpeed" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="0.0"
+            android:textSize="72sp" android:textStyle="bold" android:textColor="#00E5FF"
+            android:fontFamily="monospace" android:gravity="center"
+            android:includeFontPadding="false"/>
+      </LinearLayout>
+
+      <!-- Right: alt + coords -->
+      <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+          android:layout_height="wrap_content" android:orientation="vertical"
+          android:gravity="end" android:paddingEnd="8dp">
+        <TextView android:id="@+id/tvGpsAlt" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="&#8212;"
+            android:textColor="#888888" android:textSize="11sp"/>
+        <TextView android:id="@+id/tvGpsCoords" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="&#8212;"
+            android:textColor="#666666" android:textSize="10sp"/>
+      </LinearLayout>
+    </LinearLayout>
+
+    <!-- ══ SINGLE-MODE PANEL ══ -->
+    <LinearLayout android:id="@+id/layoutSingle" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:orientation="vertical"
+        android:visibility="gone">
+
+      <TextView android:id="@+id/tvAssignBanner" android:layout_width="match_parent"
+          android:layout_height="wrap_content" android:text="Assign this module"
+          android:textColor="#FFFFFF" android:textSize="12sp" android:padding="10dp"
+          android:layout_marginBottom="6dp"/>
+      <TextView android:id="@+id/tvSingleName" android:layout_width="match_parent"
+          android:layout_height="wrap_content" android:text="BLE Module"
+          android:textColor="#FFFFFF" android:textSize="13sp" android:textStyle="bold"
+          android:gravity="center" android:paddingBottom="6dp"/>
+
+      <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+          android:orientation="horizontal" android:layout_marginBottom="10dp">
+        <Button android:id="@+id/btnAssignPort" android:layout_width="0dp"
+            android:layout_weight="1" android:layout_height="56dp"
+            android:text="Assign as PORT&#10;(M1+M2 Left)"
+            android:textSize="13sp" android:backgroundTint="#1A4A1A"
+            android:layout_marginEnd="5dp"/>
+        <Button android:id="@+id/btnAssignStbd" android:layout_width="0dp"
+            android:layout_weight="1" android:layout_height="56dp"
+            android:text="Assign as STBD&#10;(M3+M4 Right)"
+            android:textSize="13sp" android:backgroundTint="#1A1A4A"
+            android:layout_marginStart="5dp"/>
+      </LinearLayout>
+
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+          android:text="TEST THROTTLE — spin to verify" android:textColor="#888888"
+          android:textSize="11sp" android:paddingBottom="4dp"/>
+
+      <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+          android:orientation="horizontal" android:gravity="center_vertical"
+          android:layout_marginBottom="8dp">
+        <Button android:id="@+id/btnSingleDown" android:layout_width="64dp"
+            android:layout_height="64dp" android:text="&#9660;" android:textSize="24sp"
+            android:backgroundTint="#4A3A00" android:padding="0dp"/>
+        <SeekBar android:id="@+id/seekSingle" android:layout_width="0dp"
+            android:layout_weight="1" android:layout_height="wrap_content"
+            android:progressTint="#FFCC00" android:thumbTint="#FFCC00"
+            android:max="100" android:layout_marginHorizontal="8dp"/>
+        <Button android:id="@+id/btnSingleUp" android:layout_width="64dp"
+            android:layout_height="64dp" android:text="&#9650;" android:textSize="24sp"
+            android:backgroundTint="#4A3A00" android:padding="0dp"/>
+        <TextView android:id="@+id/tvSinglePct" android:layout_width="70dp"
+            android:layout_height="wrap_content" android:text="0%" android:textColor="#FFCC00"
+            android:textSize="14sp" android:textStyle="bold" android:gravity="end"
+            android:paddingStart="6dp"/>
+      </LinearLayout>
+      <Button android:id="@+id/btnSingleStop" android:layout_width="match_parent"
+          android:layout_height="60dp" android:text="STOP" android:textStyle="bold"
+          android:textSize="18sp" android:backgroundTint="#CC0000" android:enabled="false"/>
+    </LinearLayout>
+
+    <!-- ══ DUAL-MODE PANEL ══ -->
+    <LinearLayout android:id="@+id/layoutDual" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:orientation="vertical"
+        android:visibility="gone">
+
+      <!-- 4-motor status bar: label | progress | % duty side-by-side, bigger text -->
+      <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+          android:orientation="horizontal" android:background="#1A1A1A"
+          android:padding="8dp" android:layout_marginBottom="6dp">
+
+        <!-- M1 -->
+        <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:orientation="vertical"
+            android:paddingEnd="3dp">
+          <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+              android:text="M1" android:textColor="#44CC44" android:textSize="12sp"
+              android:textStyle="bold" android:gravity="center"/>
+          <ProgressBar android:id="@+id/pbM1" style="?android:attr/progressBarStyleHorizontal"
+              android:layout_width="match_parent" android:layout_height="12dp"
+              android:progressTint="#44CC44" android:max="100"/>
+          <!-- % and duty side by side -->
+          <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+              android:orientation="horizontal" android:gravity="center">
+            <TextView android:id="@+id/tvM1Pct" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="0%"
+                android:textColor="#44CC44" android:textSize="13sp" android:textStyle="bold"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text=" | " android:textColor="#444444" android:textSize="13sp"/>
+            <TextView android:id="@+id/tvM1Duty" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="500"
+                android:textColor="#88FF88" android:textSize="13sp"/>
+          </LinearLayout>
+        </LinearLayout>
+
+        <!-- M2 -->
+        <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:orientation="vertical"
+            android:paddingEnd="6dp">
+          <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+              android:text="M2" android:textColor="#66FF66" android:textSize="12sp"
+              android:textStyle="bold" android:gravity="center"/>
+          <ProgressBar android:id="@+id/pbM2" style="?android:attr/progressBarStyleHorizontal"
+              android:layout_width="match_parent" android:layout_height="12dp"
+              android:progressTint="#66FF66" android:max="100"/>
+          <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+              android:orientation="horizontal" android:gravity="center">
+            <TextView android:id="@+id/tvM2Pct" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="0%"
+                android:textColor="#66FF66" android:textSize="13sp" android:textStyle="bold"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text=" | " android:textColor="#444444" android:textSize="13sp"/>
+            <TextView android:id="@+id/tvM2Duty" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="500"
+                android:textColor="#88FF88" android:textSize="13sp"/>
+          </LinearLayout>
+        </LinearLayout>
+
+        <!-- M3 -->
+        <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:orientation="vertical"
+            android:paddingStart="6dp">
+          <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+              android:text="M3" android:textColor="#4477FF" android:textSize="12sp"
+              android:textStyle="bold" android:gravity="center"/>
+          <ProgressBar android:id="@+id/pbM3" style="?android:attr/progressBarStyleHorizontal"
+              android:layout_width="match_parent" android:layout_height="12dp"
+              android:progressTint="#4477FF" android:max="100"/>
+          <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+              android:orientation="horizontal" android:gravity="center">
+            <TextView android:id="@+id/tvM3Pct" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="0%"
+                android:textColor="#4477FF" android:textSize="13sp" android:textStyle="bold"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text=" | " android:textColor="#444444" android:textSize="13sp"/>
+            <TextView android:id="@+id/tvM3Duty" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="500"
+                android:textColor="#8899FF" android:textSize="13sp"/>
+          </LinearLayout>
+        </LinearLayout>
+
+        <!-- M4 -->
+        <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:orientation="vertical"
+            android:paddingStart="3dp">
+          <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+              android:text="M4" android:textColor="#6699FF" android:textSize="12sp"
+              android:textStyle="bold" android:gravity="center"/>
+          <ProgressBar android:id="@+id/pbM4" style="?android:attr/progressBarStyleHorizontal"
+              android:layout_width="match_parent" android:layout_height="12dp"
+              android:progressTint="#6699FF" android:max="100"/>
+          <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+              android:orientation="horizontal" android:gravity="center">
+            <TextView android:id="@+id/tvM4Pct" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="0%"
+                android:textColor="#6699FF" android:textSize="13sp" android:textStyle="bold"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text=" | " android:textColor="#444444" android:textSize="13sp"/>
+            <TextView android:id="@+id/tvM4Duty" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="500"
+                android:textColor="#8899FF" android:textSize="13sp"/>
+          </LinearLayout>
+        </LinearLayout>
+      </LinearLayout>
+
+      <!-- Sync selector — 60dp tall, full-width, wrapped in its own ScrollView
+           guarantee so it CANNOT be cut off -->
+      <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+          android:orientation="horizontal" android:layout_marginBottom="6dp">
+        <Button android:id="@+id/btnSyncAll" android:layout_width="0dp"
+            android:layout_weight="1" android:layout_height="60dp"
+            android:text="All Sync" android:textSize="14sp" android:textStyle="bold"
+            android:backgroundTint="#1565C0" android:layout_marginEnd="4dp"/>
+        <Button android:id="@+id/btnSyncSide" android:layout_width="0dp"
+            android:layout_weight="1" android:layout_height="60dp"
+            android:text="Side Sync" android:textSize="14sp" android:textStyle="bold"
+            android:backgroundTint="#333333" android:layout_marginEnd="4dp"/>
+        <Button android:id="@+id/btnSyncNone" android:layout_width="0dp"
+            android:layout_weight="1" android:layout_height="60dp"
+            android:text="Indep." android:textSize="14sp" android:textStyle="bold"
+            android:backgroundTint="#333333"/>
+      </LinearLayout>
+
+      <!-- ── SYNC_ALL panel ── -->
+      <LinearLayout android:id="@+id/layoutSyncAll" android:layout_width="match_parent"
+          android:layout_height="wrap_content" android:orientation="vertical"
+          android:background="#181818" android:padding="10dp"
+          android:layout_marginBottom="6dp">
+
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="MASTER THROTTLE" android:textColor="#CCCCCC"
+            android:textSize="12sp" android:textStyle="bold" android:paddingBottom="6dp"/>
+
+        <!-- Master: ▼  slider  ▲  value — bigger buttons -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical"
+            android:paddingBottom="10dp">
+          <Button android:id="@+id/btnMasterDown" android:layout_width="64dp"
+              android:layout_height="64dp" android:text="&#9660;" android:textSize="24sp"
+              android:backgroundTint="#1A3A4A" android:padding="0dp"/>
+          <SeekBar android:id="@+id/seekMaster" android:layout_width="0dp"
+              android:layout_weight="1" android:layout_height="wrap_content"
+              android:progressTint="#00E5FF" android:thumbTint="#00E5FF"
+              android:max="100" android:layout_marginHorizontal="8dp"/>
+          <Button android:id="@+id/btnMasterUp" android:layout_width="64dp"
+              android:layout_height="64dp" android:text="&#9650;" android:textSize="24sp"
+              android:backgroundTint="#1A3A4A" android:padding="0dp"/>
+          <TextView android:id="@+id/tvMasterPct" android:layout_width="56dp"
+              android:layout_height="wrap_content" android:text="0%" android:textColor="#00E5FF"
+              android:textSize="15sp" android:textStyle="bold" android:gravity="end"
+              android:paddingStart="4dp"/>
+        </LinearLayout>
+
+        <!-- Side trim — bigger buttons -->
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="SIDE TRIM" android:textColor="#888888"
+            android:textSize="11sp" android:paddingBottom="6dp"/>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical">
+
+          <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+              android:text="L" android:textColor="#66FF66" android:textSize="14sp"
+              android:paddingEnd="4dp"/>
+          <Button android:id="@+id/btnPortSideTrimDown" android:layout_width="56dp"
+              android:layout_height="56dp" android:text="&#9660;" android:textSize="20sp"
+              android:backgroundTint="#2A4A2A" android:padding="0dp"/>
+          <TextView android:id="@+id/tvPortSideTrimVal" android:layout_width="48dp"
+              android:layout_height="wrap_content" android:text="0"
+              android:textColor="#66FF66" android:textSize="14sp" android:gravity="center"/>
+          <Button android:id="@+id/btnPortSideTrimUp" android:layout_width="56dp"
+              android:layout_height="56dp" android:text="&#9650;" android:textSize="20sp"
+              android:backgroundTint="#2A4A2A" android:padding="0dp"/>
+
+          <View android:layout_width="0dp" android:layout_weight="1" android:layout_height="1dp"/>
+
+          <Button android:id="@+id/btnResetTrims" android:layout_width="52dp"
+              android:layout_height="56dp" android:text="RST" android:textSize="12sp"
+              android:backgroundTint="#444444"/>
+
+          <View android:layout_width="0dp" android:layout_weight="1" android:layout_height="1dp"/>
+
+          <Button android:id="@+id/btnStbdSideTrimDown" android:layout_width="56dp"
+              android:layout_height="56dp" android:text="&#9660;" android:textSize="20sp"
+              android:backgroundTint="#2A2A4A" android:padding="0dp"/>
+          <TextView android:id="@+id/tvStbdSideTrimVal" android:layout_width="48dp"
+              android:layout_height="wrap_content" android:text="0"
+              android:textColor="#6699FF" android:textSize="14sp" android:gravity="center"/>
+          <Button android:id="@+id/btnStbdSideTrimUp" android:layout_width="56dp"
+              android:layout_height="56dp" android:text="&#9650;" android:textSize="20sp"
+              android:backgroundTint="#2A2A4A" android:padding="0dp"/>
+          <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+              android:text="R" android:textColor="#6699FF" android:textSize="14sp"
+              android:paddingStart="4dp"/>
+        </LinearLayout>
+
+        <!-- Port / Stbd pct -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:paddingTop="8dp">
+          <TextView android:id="@+id/tvPortPct" android:layout_width="0dp"
+              android:layout_weight="1" android:layout_height="wrap_content"
+              android:text="L 0%" android:textColor="#66FF66"
+              android:textSize="15sp" android:textStyle="bold" android:gravity="center"/>
+          <TextView android:id="@+id/tvStbdPct" android:layout_width="0dp"
+              android:layout_weight="1" android:layout_height="wrap_content"
+              android:text="R 0%" android:textColor="#6699FF"
+              android:textSize="15sp" android:textStyle="bold" android:gravity="center"/>
+        </LinearLayout>
+      </LinearLayout>
+
+      <!-- ── SYNC_SIDE panel ── -->
+      <LinearLayout android:id="@+id/layoutSyncSide" android:layout_width="match_parent"
+          android:layout_height="wrap_content" android:orientation="horizontal"
+          android:background="#181818" android:padding="10dp"
+          android:layout_marginBottom="6dp" android:visibility="gone">
+
+        <!-- Port side -->
+        <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:orientation="vertical"
+            android:paddingEnd="8dp">
+          <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+              android:text="PORT  M1+M2" android:textColor="#66FF66"
+              android:textSize="12sp" android:textStyle="bold" android:paddingBottom="6dp"/>
+          <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+              android:orientation="horizontal" android:gravity="center_vertical">
+            <Button android:id="@+id/btnPortSideDown" android:layout_width="56dp"
+                android:layout_height="56dp" android:text="&#9660;" android:textSize="20sp"
+                android:backgroundTint="#2A4A2A" android:padding="0dp"/>
+            <SeekBar android:id="@+id/seekPort" android:layout_width="0dp"
+                android:layout_weight="1" android:layout_height="wrap_content"
+                android:progressTint="#66FF66" android:thumbTint="#66FF66"
+                android:layout_marginHorizontal="4dp"/>
+            <Button android:id="@+id/btnPortSideUp" android:layout_width="56dp"
+                android:layout_height="56dp" android:text="&#9650;" android:textSize="20sp"
+                android:backgroundTint="#2A4A2A" android:padding="0dp"/>
+          </LinearLayout>
+          <TextView android:id="@+id/tvPortSidePct" android:layout_width="match_parent"
+              android:layout_height="wrap_content" android:text="0%"
+              android:textColor="#66FF66" android:textSize="15sp"
+              android:textStyle="bold" android:gravity="center" android:paddingTop="4dp"/>
+        </LinearLayout>
+
+        <!-- Stbd side -->
+        <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:orientation="vertical"
+            android:paddingStart="8dp">
+          <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+              android:text="STBD  M3+M4" android:textColor="#6699FF"
+              android:textSize="12sp" android:textStyle="bold"
+              android:gravity="end" android:paddingBottom="6dp"/>
+          <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+              android:orientation="horizontal" android:gravity="center_vertical">
+            <Button android:id="@+id/btnStbdSideDown" android:layout_width="56dp"
+                android:layout_height="56dp" android:text="&#9660;" android:textSize="20sp"
+                android:backgroundTint="#2A2A4A" android:padding="0dp"/>
+            <SeekBar android:id="@+id/seekStbd" android:layout_width="0dp"
+                android:layout_weight="1" android:layout_height="wrap_content"
+                android:progressTint="#6699FF" android:thumbTint="#6699FF"
+                android:layout_marginHorizontal="4dp"/>
+            <Button android:id="@+id/btnStbdSideUp" android:layout_width="56dp"
+                android:layout_height="56dp" android:text="&#9650;" android:textSize="20sp"
+                android:backgroundTint="#2A2A4A" android:padding="0dp"/>
+          </LinearLayout>
+          <TextView android:id="@+id/tvStbdSidePct" android:layout_width="match_parent"
+              android:layout_height="wrap_content" android:text="0%"
+              android:textColor="#6699FF" android:textSize="15sp"
+              android:textStyle="bold" android:gravity="center" android:paddingTop="4dp"/>
+        </LinearLayout>
+      </LinearLayout>
+
+      <!-- ── SYNC_NONE panel: 4 columns ── -->
+      <LinearLayout android:id="@+id/layoutSyncNone" android:layout_width="match_parent"
+          android:layout_height="wrap_content" android:orientation="horizontal"
+          android:background="#181818" android:padding="8dp"
+          android:layout_marginBottom="6dp" android:visibility="gone">
+
+        <!-- M1 -->
+        <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:orientation="vertical"
+            android:paddingEnd="2dp" android:gravity="center_horizontal">
+          <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+              android:text="M1" android:textColor="#44CC44" android:textSize="12sp"
+              android:textStyle="bold"/>
+          <Button android:id="@+id/btnM1Up" android:layout_width="match_parent"
+              android:layout_height="52dp" android:text="&#9650;" android:textSize="20sp"
+              android:backgroundTint="#1A4A1A" android:padding="0dp"/>
+          <SeekBar android:id="@+id/seekM1" android:layout_width="match_parent"
+              android:layout_height="wrap_content" android:progressTint="#44CC44"
+              android:thumbTint="#44CC44"/>
+          <Button android:id="@+id/btnM1Down" android:layout_width="match_parent"
+              android:layout_height="52dp" android:text="&#9660;" android:textSize="20sp"
+              android:backgroundTint="#1A4A1A" android:padding="0dp"/>
+          <TextView android:id="@+id/tvM1OnlyPct" android:layout_width="match_parent"
+              android:layout_height="wrap_content" android:text="0%"
+              android:textColor="#44CC44" android:textSize="11sp" android:gravity="center"/>
+        </LinearLayout>
+
+        <!-- M2 -->
+        <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:orientation="vertical"
+            android:paddingEnd="4dp" android:gravity="center_horizontal">
+          <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+              android:text="M2" android:textColor="#66FF66" android:textSize="12sp"
+              android:textStyle="bold"/>
+          <Button android:id="@+id/btnM2Up" android:layout_width="match_parent"
+              android:layout_height="52dp" android:text="&#9650;" android:textSize="20sp"
+              android:backgroundTint="#1A4A1A" android:padding="0dp"/>
+          <SeekBar android:id="@+id/seekM2" android:layout_width="match_parent"
+              android:layout_height="wrap_content" android:progressTint="#66FF66"
+              android:thumbTint="#66FF66"/>
+          <Button android:id="@+id/btnM2Down" android:layout_width="match_parent"
+              android:layout_height="52dp" android:text="&#9660;" android:textSize="20sp"
+              android:backgroundTint="#1A4A1A" android:padding="0dp"/>
+          <TextView android:id="@+id/tvM2OnlyPct" android:layout_width="match_parent"
+              android:layout_height="wrap_content" android:text="0%"
+              android:textColor="#66FF66" android:textSize="11sp" android:gravity="center"/>
+        </LinearLayout>
+
+        <!-- M3 -->
+        <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:orientation="vertical"
+            android:paddingStart="4dp" android:gravity="center_horizontal">
+          <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+              android:text="M3" android:textColor="#4477FF" android:textSize="12sp"
+              android:textStyle="bold"/>
+          <Button android:id="@+id/btnM3Up" android:layout_width="match_parent"
+              android:layout_height="52dp" android:text="&#9650;" android:textSize="20sp"
+              android:backgroundTint="#1A1A4A" android:padding="0dp"/>
+          <SeekBar android:id="@+id/seekM3" android:layout_width="match_parent"
+              android:layout_height="wrap_content" android:progressTint="#4477FF"
+              android:thumbTint="#4477FF"/>
+          <Button android:id="@+id/btnM3Down" android:layout_width="match_parent"
+              android:layout_height="52dp" android:text="&#9660;" android:textSize="20sp"
+              android:backgroundTint="#1A1A4A" android:padding="0dp"/>
+          <TextView android:id="@+id/tvM3OnlyPct" android:layout_width="match_parent"
+              android:layout_height="wrap_content" android:text="0%"
+              android:textColor="#4477FF" android:textSize="11sp" android:gravity="center"/>
+        </LinearLayout>
+
+        <!-- M4 -->
+        <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:orientation="vertical"
+            android:paddingStart="2dp" android:gravity="center_horizontal">
+          <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+              android:text="M4" android:textColor="#6699FF" android:textSize="12sp"
+              android:textStyle="bold"/>
+          <Button android:id="@+id/btnM4Up" android:layout_width="match_parent"
+              android:layout_height="52dp" android:text="&#9650;" android:textSize="20sp"
+              android:backgroundTint="#1A1A4A" android:padding="0dp"/>
+          <SeekBar android:id="@+id/seekM4" android:layout_width="match_parent"
+              android:layout_height="wrap_content" android:progressTint="#6699FF"
+              android:thumbTint="#6699FF"/>
+          <Button android:id="@+id/btnM4Down" android:layout_width="match_parent"
+              android:layout_height="52dp" android:text="&#9660;" android:textSize="20sp"
+              android:backgroundTint="#1A1A4A" android:padding="0dp"/>
+          <TextView android:id="@+id/tvM4OnlyPct" android:layout_width="match_parent"
+              android:layout_height="wrap_content" android:text="0%"
+              android:textColor="#6699FF" android:textSize="11sp" android:gravity="center"/>
+        </LinearLayout>
+      </LinearLayout>
+
+      <!-- ── F/R trim (SYNC_ALL and SYNC_SIDE) — bigger buttons ── -->
+      <LinearLayout android:id="@+id/layoutFRTrim" android:layout_width="match_parent"
+          android:layout_height="wrap_content" android:orientation="horizontal"
+          android:background="#181818" android:padding="8dp"
+          android:gravity="center_vertical" android:layout_marginBottom="6dp">
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="F/R\ntrim" android:textColor="#888888" android:textSize="11sp"
+            android:paddingEnd="6dp" android:gravity="center"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="L" android:textColor="#66FF66" android:textSize="14sp"
+            android:paddingEnd="4dp"/>
+        <Button android:id="@+id/btnPortFRTrimDown" android:layout_width="56dp"
+            android:layout_height="56dp" android:text="&#9660;" android:textSize="20sp"
+            android:backgroundTint="#2A4A2A" android:padding="0dp"/>
+        <TextView android:id="@+id/tvPortFRTrimVal" android:layout_width="48dp"
+            android:layout_height="wrap_content" android:text="0"
+            android:textColor="#66FF66" android:textSize="14sp" android:gravity="center"/>
+        <Button android:id="@+id/btnPortFRTrimUp" android:layout_width="56dp"
+            android:layout_height="56dp" android:text="&#9650;" android:textSize="20sp"
+            android:backgroundTint="#2A4A2A" android:padding="0dp"/>
+
+        <View android:layout_width="0dp" android:layout_weight="1" android:layout_height="1dp"/>
+
+        <Button android:id="@+id/btnStbdFRTrimDown" android:layout_width="56dp"
+            android:layout_height="56dp" android:text="&#9660;" android:textSize="20sp"
+            android:backgroundTint="#2A2A4A" android:padding="0dp"/>
+        <TextView android:id="@+id/tvStbdFRTrimVal" android:layout_width="48dp"
+            android:layout_height="wrap_content" android:text="0"
+            android:textColor="#6699FF" android:textSize="14sp" android:gravity="center"/>
+        <Button android:id="@+id/btnStbdFRTrimUp" android:layout_width="56dp"
+            android:layout_height="56dp" android:text="&#9650;" android:textSize="20sp"
+            android:backgroundTint="#2A2A4A" android:padding="0dp"/>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="R" android:textColor="#6699FF" android:textSize="14sp"
+            android:paddingStart="4dp"/>
+      </LinearLayout>
+
+      <!-- STOP -->
+      <Button android:id="@+id/btnStop" android:layout_width="match_parent"
+          android:layout_height="64dp" android:text="STOP ALL MOTORS"
+          android:textSize="18sp" android:textStyle="bold"
+          android:backgroundTint="#CC0000" android:enabled="false"/>
+
+    </LinearLayout><!-- end layoutDual -->
+  </LinearLayout>
+</ScrollView>

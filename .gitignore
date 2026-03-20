@@ -1,0 +1,40 @@
+################################
+# Android / Gradle
+################################
+*.iml
+.gradle/
+.idea/
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build/
+/app/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Generated files
+bin/
+gen/
+out/
+
+# Signing configs — never commit keystore or signing properties
+*.jks
+*.keystore
+keystore.properties
+release-signing.properties
+
+# Local config
+local.properties
+
+# Kotlin symbol processing
+.ksp/
