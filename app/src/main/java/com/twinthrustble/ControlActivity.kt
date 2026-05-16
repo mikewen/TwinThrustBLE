@@ -14,6 +14,8 @@ import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.speech.tts.TextToSpeech
+import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.widget.SeekBar
@@ -25,6 +27,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.twinthrustble.databinding.ActivityControlBinding
 import no.nordicsemi.android.ble.observer.ConnectionObserver
+import java.util.Locale
 
 /**
  * TwinThrustBLE — ControlActivity
@@ -40,7 +43,7 @@ import no.nordicsemi.android.ble.observer.ConnectionObserver
  *
  * Status bar: always visible, shows M1–M4 progress bar + % + raw PWM duty.
  */
-class ControlActivity : AppCompatActivity() {
+class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private lateinit var binding: ActivityControlBinding
     private lateinit var prefs: SharedPreferences
@@ -98,6 +101,10 @@ class ControlActivity : AppCompatActivity() {
         ActivityResultContracts.RequestPermission()
     ) { granted -> if (granted) gpsManager.startPhoneGps() }
 
+    // Lookbon Remote & TTS
+    private var tts: TextToSpeech? = null
+    private var remote: LookbonRemote? = null
+
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -107,6 +114,8 @@ class ControlActivity : AppCompatActivity() {
 
         prefs = getSharedPreferences(MainActivity.PREFS_NAME, Context.MODE_PRIVATE)
         mode  = intent.getStringExtra(EXTRA_MODE) ?: MODE_SINGLE
+
+        tts = TextToSpeech(this, this)
 
         when (mode) {
             MODE_SINGLE -> initSingleMode()
@@ -118,6 +127,8 @@ class ControlActivity : AppCompatActivity() {
         setupBackPress()
         scheduleFeedbackPoll()
         updateConnUi()
+
+        setupLookbonRemote()
     }
 
     override fun onDestroy() {
@@ -132,6 +143,158 @@ class ControlActivity : AppCompatActivity() {
                 portBle.close(); stbdBle.close()
             }
         }
+        remote?.disconnect()?.enqueue()
+        tts?.stop()
+        tts?.shutdown()
+    }
+
+    // ── TTS ───────────────────────────────────────────────────────────────────
+
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            tts?.language = Locale.US
+            speak("System ready")
+        }
+    }
+
+    private fun speak(text: String) {
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+    }
+
+    // ── Lookbon Remote ────────────────────────────────────────────────────────
+
+    private fun setupLookbonRemote() {
+        remote = LookbonRemote(this)
+        remote?.onConnected = {
+            speak("Remote connected")
+            vibrate(100)
+        }
+        remote?.onDisconnected = {
+            speak("Remote lost")
+        }
+        remote?.onCommand = { cmd ->
+            handleRemoteCommand(cmd)
+        }
+
+        // Auto-connect to first Lookbon found in bonded devices or recent scan?
+        // For simplicity, scan briefly or just check bonded
+        val bm = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        @SuppressLint("MissingPermission")
+        val bonded = bm.adapter.bondedDevices
+        val lookbon = bonded?.find { dev ->
+            val name = dev.name ?: ""
+            LookbonRemote.REMOTE_NAME_FILTERS.any { name.contains(it, ignoreCase = true) }
+        }
+
+        lookbon?.let {
+            remote?.connectToDevice(it, true)
+        } ?: run {
+            Log.w("ControlActivity", "No Lookbon remote found in bonded devices")
+        }
+    }
+
+    private fun handleRemoteCommand(cmd: LookbonRemote.Command) {
+        when (cmd) {
+            LookbonRemote.Command.SPEED_UP -> {
+                adjustMaster(1)
+            }
+            LookbonRemote.Command.SPEED_DOWN -> {
+                adjustMaster(-1)
+            }
+            LookbonRemote.Command.SPEED_UP_FAST -> {
+                adjustMaster(5)
+            }
+            LookbonRemote.Command.SPEED_DOWN_FAST -> {
+                adjustMaster(-5)
+            }
+            LookbonRemote.Command.STOP -> {
+                speak("Stopped")
+                safeStopAll()
+                resetAllThrottle()
+                updateThrustUi()
+                vibrate(200)
+            }
+            LookbonRemote.Command.START_REPEAT_UP -> {
+                startRamp(1, false)
+            }
+            LookbonRemote.Command.START_REPEAT_DOWN -> {
+                startRamp(-1, false)
+            }
+            LookbonRemote.Command.START_REPEAT_UP_FAST -> {
+                startRamp(1, true)
+            }
+            LookbonRemote.Command.START_REPEAT_DOWN_FAST -> {
+                startRamp(-1, true)
+            }
+            LookbonRemote.Command.STOP_REPEAT -> {
+                stopRamp()
+            }
+            LookbonRemote.Command.START_STEER_LEFT -> {
+                speak("Left")
+                startSteer(-1)
+            }
+            LookbonRemote.Command.START_STEER_RIGHT -> {
+                speak("Right")
+                startSteer(1)
+            }
+            LookbonRemote.Command.STOP_STEER -> {
+                stopSteer()
+            }
+            else -> {}
+        }
+    }
+
+    private var rampRunnable: Runnable? = null
+    private fun startRamp(dir: Int, fast: Boolean) {
+        stopRamp()
+        rampRunnable = object : Runnable {
+            override fun run() {
+                adjustMaster(dir * (if (fast) 2 else 1))
+                handler.postDelayed(this, 100)
+            }
+        }
+        handler.post(rampRunnable!!)
+    }
+    private fun stopRamp() {
+        rampRunnable?.let { handler.removeCallbacks(it) }
+        rampRunnable = null
+    }
+
+    private fun adjustMaster(deltaPct: Int) {
+        val currentPct = nativeToPercent(masterVal)
+        val newPct = (currentPct + deltaPct).coerceIn(0, 100)
+        masterVal = percentToNative(newPct)
+        if (mode == MODE_SINGLE) {
+            sendSingle(masterVal)
+            binding.seekSingle.progress = newPct
+            binding.tvSinglePct.text = "${newPct}%  ${masterVal}u"
+        } else {
+            binding.seekMaster.progress = newPct
+            sendThrust()
+            updateThrustUi()
+        }
+    }
+
+    private var steerRunnable: Runnable? = null
+    private fun startSteer(dir: Int) {
+        stopSteer()
+        steerRunnable = object : Runnable {
+            override fun run() {
+                if (syncLevel == SYNC_ALL) {
+                    portSideTrim -= dir * 2
+                    stbdSideTrim += dir * 2
+                    clampSideTrims()
+                    sendThrust()
+                    updateThrustUi()
+                }
+                handler.postDelayed(this, 100)
+            }
+        }
+        handler.post(steerRunnable!!)
+    }
+    private fun stopSteer() {
+        steerRunnable?.let { handler.removeCallbacks(it) }
+        steerRunnable = null
     }
 
     // ── Single mode ───────────────────────────────────────────────────────────
@@ -151,8 +314,21 @@ class ControlActivity : AppCompatActivity() {
 
         singleDevice?.let {
             connectBleDevice(singleBle, it, singleName,
-                onConnected    = { singleConnected = true;  runOnUiThread { updateConnUi(); vibrate(50) } },
-                onDisconnected = { singleConnected = false; runOnUiThread { updateConnUi() } })
+                onConnected    = { 
+                    singleConnected = true
+                    runOnUiThread { 
+                        updateConnUi()
+                        vibrate(50)
+                        speak("$singleName connected")
+                    } 
+                },
+                onDisconnected = { 
+                    singleConnected = false
+                    runOnUiThread { 
+                        updateConnUi()
+                        speak("$singleName lost")
+                    } 
+                })
         }
         showSingleUi()
     }
@@ -193,6 +369,7 @@ class ControlActivity : AppCompatActivity() {
             binding.seekSingle.progress = 0
             binding.tvSinglePct.text = "0%  ${stopValue()}u"
             vibrate(150)
+            speak("Stop")
         }
     }
 
@@ -236,6 +413,7 @@ class ControlActivity : AppCompatActivity() {
         refreshAssignBanner()
         showToast("$singleName → ${if (role == ROLE_PORT) "PORT ⬅ (M1+M2)" else "STBD ➡ (M3+M4)"}")
         vibrate(80)
+        speak(if (role == ROLE_PORT) "Assigned Port" else "Assigned Starboard")
     }
 
     // ── Dual mode ─────────────────────────────────────────────────────────────
@@ -250,53 +428,47 @@ class ControlActivity : AppCompatActivity() {
         binding.tvPortLabel.text = "\u2b05 $portName"
         binding.tvStbdLabel.text = "$stbdName \u27a1"
 
-        portBle = AC6328BleManager(this); stbdBle = AC6328BleManager(this)
+        portBle = AC6328BleManager(this)
+        stbdBle = AC6328BleManager(this)
 
-        val bt = (getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
-        fun resolve(a: String) = try { bt.getRemoteDevice(a) } catch (e: Exception) { null }
+        val bm = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        val adapter = bm.adapter
 
-        resolve(portAddr)?.let { dev ->
-            connectBleDevice(portBle, dev, portName,
-                onConnected    = { portConnected = true;  runOnUiThread { updateConnUi(); vibrate(50) } },
-                onDisconnected = { portConnected = false; runOnUiThread { updateConnUi() } },
-                battCallback   = { pct -> runOnUiThread { binding.tvPortBatt.text = "\uD83D\uDD0B $pct%" } })
-        } ?: showToast("Cannot resolve Port device")
+        if (portAddr.isNotEmpty()) {
+            connectBleDevice(portBle, adapter.getRemoteDevice(portAddr), portName,
+                onConnected    = { portConnected = true; runOnUiThread { updateConnUi(); vibrate(50); speak("Port connected") } },
+                onDisconnected = { portConnected = false; runOnUiThread { updateConnUi(); speak("Port lost") } },
+                battCallback   = { p -> runOnUiThread { binding.tvPortBatt.text = "$p%" } }
+            )
+        }
+        if (stbdAddr.isNotEmpty()) {
+            connectBleDevice(stbdBle, adapter.getRemoteDevice(stbdAddr), stbdName,
+                onConnected    = { stbdConnected = true; runOnUiThread { updateConnUi(); vibrate(50); speak("Starboard connected") } },
+                onDisconnected = { stbdConnected = false; runOnUiThread { updateConnUi(); speak("Starboard lost") } },
+                battCallback   = { p -> runOnUiThread { binding.tvStbdBatt.text = "$p%" } }
+            )
+        }
 
-        resolve(stbdAddr)?.let { dev ->
-            connectBleDevice(stbdBle, dev, stbdName,
-                onConnected    = { stbdConnected = true;  runOnUiThread { updateConnUi(); vibrate(50) } },
-                onDisconnected = { stbdConnected = false; runOnUiThread { updateConnUi() } },
-                battCallback   = { pct -> runOnUiThread { binding.tvStbdBatt.text = "\uD83D\uDD0B $pct%" } })
-        } ?: showToast("Cannot resolve Starboard device")
-
-        showDualUi()
-    }
-
-    private fun showDualUi() {
-        binding.layoutSingle.visibility = View.GONE
-        binding.layoutDual.visibility   = View.VISIBLE
         setupSyncControls()
         setupStopButton()
         setupSpeedUnitButton()
         applySyncLevel()
-        updateThrustUi()  // initialise status bar immediately
     }
 
-    // ── BLE connect helper ────────────────────────────────────────────────────
-
     private fun connectBleDevice(
-        mgr: AC6328BleManager, device: BluetoothDevice, label: String,
-        onConnected: () -> Unit, onDisconnected: () -> Unit,
+        mgr: AC6328BleManager,
+        device: BluetoothDevice,
+        name: String,
+        onConnected: () -> Unit,
+        onDisconnected: () -> Unit,
         battCallback: ((Int) -> Unit)? = null
     ) {
         mgr.setConnectionObserver(object : ConnectionObserver {
             override fun onDeviceConnecting(d: BluetoothDevice) {}
-            override fun onDeviceConnected(d: BluetoothDevice)              = onConnected()
-            override fun onDeviceFailedToConnect(d: BluetoothDevice, r: Int) {
-                runOnUiThread { showToast("$label connect failed ($r)") }
-            }
             override fun onDeviceDisconnecting(d: BluetoothDevice) {}
-            override fun onDeviceDisconnected(d: BluetoothDevice, r: Int)   = onDisconnected()
+            override fun onDeviceConnected(d: BluetoothDevice) { onConnected() }
+            override fun onDeviceDisconnected(d: BluetoothDevice, reason: Int) { onDisconnected() }
+            override fun onDeviceFailedToConnect(d: BluetoothDevice, reason: Int) { onDisconnected() }
             override fun onDeviceReady(d: BluetoothDevice) { mgr.applyMode() }
         })
         battCallback?.let { cb ->
@@ -323,6 +495,7 @@ class ControlActivity : AppCompatActivity() {
             safeStopAll()
             updateSliderRanges()
             updateThrustUi()
+            speak(if (escMode) "ESC mode" else "BLDC mode")
         }
     }
 
@@ -331,9 +504,9 @@ class ControlActivity : AppCompatActivity() {
     // ── Sync controls ─────────────────────────────────────────────────────────
 
     private fun setupSyncControls() {
-        binding.btnSyncAll.setOnClickListener  { setSyncLevel(SYNC_ALL);  sendThrust(); updateThrustUi() }
-        binding.btnSyncSide.setOnClickListener { setSyncLevel(SYNC_SIDE); sendThrust(); updateThrustUi() }
-        binding.btnSyncNone.setOnClickListener { setSyncLevel(SYNC_NONE); sendThrust(); updateThrustUi() }
+        binding.btnSyncAll.setOnClickListener  { setSyncLevel(SYNC_ALL);  sendThrust(); updateThrustUi(); speak("Sync All") }
+        binding.btnSyncSide.setOnClickListener { setSyncLevel(SYNC_SIDE); sendThrust(); updateThrustUi(); speak("Sync Side") }
+        binding.btnSyncNone.setOnClickListener { setSyncLevel(SYNC_NONE); sendThrust(); updateThrustUi(); speak("Independent") }
 
         // ── SYNC_ALL: master ▼▲ + slider ──
         setupThrottleButtons(
@@ -360,6 +533,7 @@ class ControlActivity : AppCompatActivity() {
         binding.btnResetTrims.setOnClickListener {
             portSideTrim = 0; stbdSideTrim = 0; portFRTrim = 0; stbdFRTrim = 0
             sendThrust(); updateThrustUi()
+            speak("Trims reset")
         }
 
         // ── F/R trims (hold) ──
@@ -630,6 +804,7 @@ class ControlActivity : AppCompatActivity() {
 
     private fun setupStopButton() {
         binding.btnStop.setOnClickListener {
+            speak("Emergency Stop")
             safeStopAll(); resetAllThrottle()
             binding.seekMaster.progress = 0
             binding.seekPort.progress = 0; binding.seekStbd.progress = 0
