@@ -34,7 +34,7 @@ import com.twinthrustble.databinding.ItemDeviceBinding
  * TwinThrustBLE — MainActivity
  *
  * Scan filter:
- *   • Default: only show devices whose name contains "ESC_PWM", "BLDC_PWM", or "AC6328"
+ *   • Default: only show devices whose name contains "ESC_PWM", "BLDC_PWM", "AC6328", or "LOOKBON"
  *   • "Show all" chip disables the name filter
  *   • Already-assigned MAC addresses are always hidden — no point re-connecting them here
  *
@@ -98,6 +98,10 @@ class MainActivity : AppCompatActivity() {
             prefs.edit().remove(KEY_STBD_ADDR).remove(KEY_STBD_NAME).apply()
             updateSavedUi()
         }
+        binding.btnClearLookbon.setOnClickListener {
+            prefs.edit().remove(KEY_LOOKBON_ADDR).remove(KEY_LOOKBON_NAME).apply()
+            updateSavedUi()
+        }
     }
 
     override fun onResume() {
@@ -111,11 +115,13 @@ class MainActivity : AppCompatActivity() {
     private fun isEscDevice(name: String) =
         name.contains("ESC_PWM",  ignoreCase = true) ||
                 name.contains("BLDC_PWM", ignoreCase = true) ||
-                name.contains("AC6328",   ignoreCase = true)
+                name.contains("AC6328",   ignoreCase = true) ||
+                name.contains("LOOKBON",  ignoreCase = true)
 
     private fun assignedAddresses(): Set<String> = buildSet {
         prefs.getString(KEY_PORT_ADDR, "")?.takeIf { it.isNotEmpty() }?.let { add(it) }
         prefs.getString(KEY_STBD_ADDR, "")?.takeIf { it.isNotEmpty() }?.let { add(it) }
+        prefs.getString(KEY_LOOKBON_ADDR, "")?.takeIf { it.isNotEmpty() }?.let { add(it) }
     }
 
     private fun rebuildVisible() {
@@ -138,16 +144,23 @@ class MainActivity : AppCompatActivity() {
         val portName = prefs.getString(KEY_PORT_NAME, "") ?: ""
         val stbdAddr = prefs.getString(KEY_STBD_ADDR, "") ?: ""
         val stbdName = prefs.getString(KEY_STBD_NAME, "") ?: ""
+        val remoteAddr = prefs.getString(KEY_LOOKBON_ADDR, "") ?: ""
+        val remoteName = prefs.getString(KEY_LOOKBON_NAME, "") ?: ""
 
         val portReady = portAddr.isNotEmpty()
         val stbdReady = stbdAddr.isNotEmpty()
+        val remoteReady = remoteAddr.isNotEmpty()
 
         binding.tvPortSaved.text = if (portReady) "\u2b05 PORT\n$portName\n$portAddr"
         else "\u2b05 PORT\n(not assigned)"
         binding.tvStbdSaved.text = if (stbdReady) "STBD \u27a1\n$stbdName\n$stbdAddr"
         else "STBD \u27a1\n(not assigned)"
+        binding.tvLookbonSaved.text = if (remoteReady) "\uD83C\uDFAE REMOTE\n$remoteName\n$remoteAddr"
+        else "REMOTE (not assigned)"
+
         binding.btnClearPort.visibility = if (portReady) View.VISIBLE else View.GONE
         binding.btnClearStbd.visibility = if (stbdReady) View.VISIBLE else View.GONE
+        binding.btnClearLookbon.visibility = if (remoteReady) View.VISIBLE else View.GONE
 
         val bothReady = portReady && stbdReady
         binding.btnConnectBoth.isEnabled = bothReady
@@ -270,6 +283,8 @@ class MainActivity : AppCompatActivity() {
         const val KEY_PORT_NAME = "port_name"
         const val KEY_STBD_ADDR = "stbd_addr"
         const val KEY_STBD_NAME = "stbd_name"
+        const val KEY_LOOKBON_ADDR = "lookbon_addr"
+        const val KEY_LOOKBON_NAME = "lookbon_name"
     }
 }
 

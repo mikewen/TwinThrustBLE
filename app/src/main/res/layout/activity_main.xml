@@ -46,6 +46,18 @@
             </LinearLayout>
         </LinearLayout>
 
+        <!-- LOOKBON REMOTE -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:background="#2A2A1A" android:padding="8dp"
+            android:layout_marginBottom="5dp">
+            <TextView android:id="@+id/tvLookbonSaved" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:text="REMOTE (not assigned)"
+                android:textColor="#FFFF66" android:textSize="10sp" android:paddingBottom="6dp"/>
+            <Button android:id="@+id/btnClearLookbon" android:layout_width="match_parent"
+                android:layout_height="36dp" android:text="Clear Remote" android:textSize="11sp"
+                android:backgroundTint="#883333" android:visibility="gone"/>
+        </LinearLayout>
+
         <TextView android:id="@+id/tvBothHint" android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Scan and connect each BLE module to assign Port and Starboard."

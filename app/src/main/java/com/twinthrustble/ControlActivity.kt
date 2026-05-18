@@ -101,18 +101,13 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         ActivityResultContracts.RequestPermission()
     ) { granted -> if (granted) gpsManager.startPhoneGps() }
 
-    // Lookbon Remote & TTS
-    private var tts: TextToSpeech? = null
-    private var remote: LookbonRemote? = null
-
-    // ── Lifecycle ─────────────────────────────────────────────────────────────
-
+    // TTS
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityControlBinding.inflate(layoutInflater)
         setContentView(binding.root)
-
         prefs = getSharedPreferences(MainActivity.PREFS_NAME, Context.MODE_PRIVATE)
+
         mode  = intent.getStringExtra(EXTRA_MODE) ?: MODE_SINGLE
 
         tts = TextToSpeech(this, this)
@@ -137,10 +132,10 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         gpsManager.stopLogging(); gpsManager.stopPhoneGps()
         safeStopAll()
         when (mode) {
-            MODE_SINGLE -> { singleBle.disconnect().enqueue(); singleBle.close() }
+            MODE_SINGLE -> { if (::singleBle.isInitialized) { singleBle.disconnect().enqueue(); singleBle.close() } }
             MODE_DUAL   -> {
-                portBle.disconnect().enqueue(); stbdBle.disconnect().enqueue()
-                portBle.close(); stbdBle.close()
+                if (::portBle.isInitialized) { portBle.disconnect().enqueue(); portBle.close() }
+                if (::stbdBle.isInitialized) { stbdBle.disconnect().enqueue(); stbdBle.close() }
             }
         }
         remote?.disconnect()?.enqueue()
@@ -149,7 +144,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     // ── TTS ───────────────────────────────────────────────────────────────────
-
+    private var tts: TextToSpeech? = null
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts?.language = Locale.US
@@ -179,8 +174,22 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // Auto-connect to first Lookbon found in bonded devices or recent scan?
         // For simplicity, scan briefly or just check bonded
         val bm = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        val adapter = bm.adapter
+        val savedAddr = prefs.getString(MainActivity.KEY_LOOKBON_ADDR, "") ?: ""
+
+        if (savedAddr.isNotEmpty()) {
+            try {
+                val device = adapter.getRemoteDevice(savedAddr)
+                remote?.connectToDevice(device, true)
+                return
+            } catch (e: Exception) {
+                Log.e("ControlActivity", "Error connecting to saved remote: $savedAddr", e)
+            }
+        }
+
+        // Fallback to bonded devices
         @SuppressLint("MissingPermission")
-        val bonded = bm.adapter.bondedDevices
+        val bonded = adapter.bondedDevices
         val lookbon = bonded?.find { dev ->
             val name = dev.name ?: ""
             LookbonRemote.REMOTE_NAME_FILTERS.any { name.contains(it, ignoreCase = true) }
@@ -189,7 +198,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         lookbon?.let {
             remote?.connectToDevice(it, true)
         } ?: run {
-            Log.w("ControlActivity", "No Lookbon remote found in bonded devices")
+            Log.w("ControlActivity", "No Lookbon remote found")
         }
     }
 
@@ -197,15 +206,19 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         when (cmd) {
             LookbonRemote.Command.SPEED_UP -> {
                 adjustMaster(1)
+                speak("${nativeToPercent(masterVal)}")
             }
             LookbonRemote.Command.SPEED_DOWN -> {
                 adjustMaster(-1)
+                speak("${nativeToPercent(masterVal)}")
             }
             LookbonRemote.Command.SPEED_UP_FAST -> {
                 adjustMaster(5)
+                speak("${nativeToPercent(masterVal)}")
             }
             LookbonRemote.Command.SPEED_DOWN_FAST -> {
                 adjustMaster(-5)
+                speak("${nativeToPercent(masterVal)}")
             }
             LookbonRemote.Command.STOP -> {
                 speak("Stopped")
@@ -228,6 +241,13 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
             LookbonRemote.Command.STOP_REPEAT -> {
                 stopRamp()
+                speak("${nativeToPercent(masterVal)}")
+            }
+            LookbonRemote.Command.STEER_LEFT -> {
+                adjustSteer(-1)
+            }
+            LookbonRemote.Command.STEER_RIGHT -> {
+                adjustSteer(1)
             }
             LookbonRemote.Command.START_STEER_LEFT -> {
                 speak("Left")
@@ -243,6 +263,8 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             else -> {}
         }
     }
+
+    private var remote: LookbonRemote? = null
 
     private var rampRunnable: Runnable? = null
     private fun startRamp(dir: Int, fast: Boolean) {
@@ -270,6 +292,16 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             binding.tvSinglePct.text = "${newPct}%  ${masterVal}u"
         } else {
             binding.seekMaster.progress = newPct
+            sendThrust()
+            updateThrustUi()
+        }
+    }
+
+    private fun adjustSteer(dir: Int) {
+        if (syncLevel == SYNC_ALL) {
+            portSideTrim += dir * 2
+            stbdSideTrim -= dir * 2
+            clampSideTrims()
             sendThrust()
             updateThrustUi()
         }
@@ -308,8 +340,13 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         val portAddr = prefs.getString(MainActivity.KEY_PORT_ADDR, "") ?: ""
         val stbdAddr = prefs.getString(MainActivity.KEY_STBD_ADDR, "") ?: ""
+        val remoteAddr = prefs.getString(MainActivity.KEY_LOOKBON_ADDR, "") ?: ""
+        
         singleRole = when (singleDevice?.address) {
-            portAddr -> ROLE_PORT; stbdAddr -> ROLE_STBD; else -> ROLE_NONE
+            portAddr -> ROLE_PORT
+            stbdAddr -> ROLE_STBD
+            remoteAddr -> ROLE_REMOTE
+            else -> ROLE_NONE
         }
 
         singleDevice?.let {
@@ -363,6 +400,8 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         binding.btnAssignPort.setOnClickListener { assignSingle(ROLE_PORT) }
         binding.btnAssignStbd.setOnClickListener { assignSingle(ROLE_STBD) }
+        binding.btnAssignRemote.setOnClickListener { assignSingle(ROLE_REMOTE) }
+        
         binding.btnSingleStop.setOnClickListener {
             singleBle.stopMotors()
             masterVal = 0
@@ -379,41 +418,68 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 binding.tvAssignBanner.text =
                     "✅ Assigned as PORT (Left) — M1+M2\nSpin to verify, then go back and connect Starboard."
                 binding.tvAssignBanner.setBackgroundColor(0xFF1A3A1A.toInt())
-                binding.btnAssignPort.alpha = 0.4f; binding.btnAssignStbd.alpha = 1f
+                binding.btnAssignPort.alpha = 0.4f; binding.btnAssignStbd.alpha = 1f; binding.btnAssignRemote.alpha = 1f
             }
             ROLE_STBD -> {
                 binding.tvAssignBanner.text =
                     "✅ Assigned as STARBOARD (Right) — M3+M4\nSpin to verify, then go back and connect Port."
                 binding.tvAssignBanner.setBackgroundColor(0xFF1A1A3A.toInt())
-                binding.btnAssignPort.alpha = 1f; binding.btnAssignStbd.alpha = 0.4f
+                binding.btnAssignPort.alpha = 1f; binding.btnAssignStbd.alpha = 0.4f; binding.btnAssignRemote.alpha = 1f
+            }
+            ROLE_REMOTE -> {
+                binding.tvAssignBanner.text =
+                    "✅ Assigned as LOOKBON REMOTE\nThis device will now control both sides in Launch mode."
+                binding.tvAssignBanner.setBackgroundColor(0xFF4A4A1A.toInt())
+                binding.btnAssignPort.alpha = 1f; binding.btnAssignStbd.alpha = 1f; binding.btnAssignRemote.alpha = 0.4f
             }
             else -> {
                 binding.tvAssignBanner.text =
                     "⚠ Not assigned — spin motors to identify this side, then assign below."
                 binding.tvAssignBanner.setBackgroundColor(0xFF2A2000.toInt())
-                binding.btnAssignPort.alpha = 1f; binding.btnAssignStbd.alpha = 1f
+                binding.btnAssignPort.alpha = 1f; binding.btnAssignStbd.alpha = 1f; binding.btnAssignRemote.alpha = 1f
             }
         }
     }
 
     private fun assignSingle(role: String) {
         val addr = singleDevice?.address ?: return
-        if (role == ROLE_PORT) {
-            if (prefs.getString(MainActivity.KEY_STBD_ADDR, "") == addr)
-                prefs.edit().remove(MainActivity.KEY_STBD_ADDR).remove(MainActivity.KEY_STBD_NAME).apply()
-            prefs.edit().putString(MainActivity.KEY_PORT_ADDR, addr)
-                .putString(MainActivity.KEY_PORT_NAME, singleName).apply()
-        } else {
-            if (prefs.getString(MainActivity.KEY_PORT_ADDR, "") == addr)
-                prefs.edit().remove(MainActivity.KEY_PORT_ADDR).remove(MainActivity.KEY_PORT_NAME).apply()
-            prefs.edit().putString(MainActivity.KEY_STBD_ADDR, addr)
-                .putString(MainActivity.KEY_STBD_NAME, singleName).apply()
+        when (role) {
+            ROLE_PORT -> {
+                if (prefs.getString(MainActivity.KEY_STBD_ADDR, "") == addr)
+                    prefs.edit().remove(MainActivity.KEY_STBD_ADDR).remove(MainActivity.KEY_STBD_NAME).apply()
+                if (prefs.getString(MainActivity.KEY_LOOKBON_ADDR, "") == addr)
+                    prefs.edit().remove(MainActivity.KEY_LOOKBON_ADDR).remove(MainActivity.KEY_LOOKBON_NAME).apply()
+                prefs.edit().putString(MainActivity.KEY_PORT_ADDR, addr)
+                    .putString(MainActivity.KEY_PORT_NAME, singleName).apply()
+            }
+            ROLE_STBD -> {
+                if (prefs.getString(MainActivity.KEY_PORT_ADDR, "") == addr)
+                    prefs.edit().remove(MainActivity.KEY_PORT_ADDR).remove(MainActivity.KEY_PORT_NAME).apply()
+                if (prefs.getString(MainActivity.KEY_LOOKBON_ADDR, "") == addr)
+                    prefs.edit().remove(MainActivity.KEY_LOOKBON_ADDR).remove(MainActivity.KEY_LOOKBON_NAME).apply()
+                prefs.edit().putString(MainActivity.KEY_STBD_ADDR, addr)
+                    .putString(MainActivity.KEY_STBD_NAME, singleName).apply()
+            }
+            ROLE_REMOTE -> {
+                if (prefs.getString(MainActivity.KEY_PORT_ADDR, "") == addr)
+                    prefs.edit().remove(MainActivity.KEY_PORT_ADDR).remove(MainActivity.KEY_PORT_NAME).apply()
+                if (prefs.getString(MainActivity.KEY_STBD_ADDR, "") == addr)
+                    prefs.edit().remove(MainActivity.KEY_STBD_ADDR).remove(MainActivity.KEY_STBD_NAME).apply()
+                prefs.edit().putString(MainActivity.KEY_LOOKBON_ADDR, addr)
+                    .putString(MainActivity.KEY_LOOKBON_NAME, singleName).apply()
+            }
         }
         singleRole = role
         refreshAssignBanner()
-        showToast("$singleName → ${if (role == ROLE_PORT) "PORT ⬅ (M1+M2)" else "STBD ➡ (M3+M4)"}")
+        val roleLabel = when(role) {
+            ROLE_PORT -> "PORT ⬅ (M1+M2)"
+            ROLE_STBD -> "STBD ➡ (M3+M4)"
+            ROLE_REMOTE -> "REMOTE"
+            else -> ""
+        }
+        showToast("$singleName → $roleLabel")
         vibrate(80)
-        speak(if (role == ROLE_PORT) "Assigned Port" else "Assigned Starboard")
+        speak("Assigned $roleLabel")
     }
 
     // ── Dual mode ─────────────────────────────────────────────────────────────
@@ -449,10 +515,17 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             )
         }
 
+        showDualUi()
+    }
+
+    private fun showDualUi() {
+        binding.layoutSingle.visibility = View.GONE
+        binding.layoutDual.visibility   = View.VISIBLE
         setupSyncControls()
         setupStopButton()
         setupSpeedUnitButton()
         applySyncLevel()
+        updateThrustUi()  // initialise status bar immediately
     }
 
     private fun connectBleDevice(
@@ -934,6 +1007,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         const val ROLE_NONE   = ""
         const val ROLE_PORT   = "port"
         const val ROLE_STBD   = "stbd"
+        const val ROLE_REMOTE = "remote"
 
         const val SYNC_ALL  = "all"
         const val SYNC_SIDE = "side"

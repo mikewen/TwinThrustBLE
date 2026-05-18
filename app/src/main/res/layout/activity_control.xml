@@ -53,15 +53,12 @@
       </LinearLayout>
     </LinearLayout>
 
-    <!-- ══ GPS ROW ══
-         fillViewport=true + ScrollView means the GPS row won't get clipped.
-         btn km/h sits ABOVE the speed number so it can never be cut off. -->
+    <!-- ══ GPS ROW ══ -->
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
         android:orientation="horizontal" android:background="#0D0D0D"
         android:gravity="center_vertical" android:paddingVertical="8dp"
         android:layout_marginBottom="6dp">
 
-      <!-- Left: fix + heading -->
       <LinearLayout android:layout_width="0dp" android:layout_weight="1"
           android:layout_height="wrap_content" android:orientation="vertical"
           android:paddingStart="8dp">
@@ -73,7 +70,6 @@
             android:textColor="#888888" android:textSize="11sp"/>
       </LinearLayout>
 
-      <!-- Centre: unit toggle button ON TOP, then big number -->
       <LinearLayout android:layout_width="0dp" android:layout_weight="2"
           android:layout_height="wrap_content" android:orientation="vertical"
           android:gravity="center">
@@ -83,7 +79,6 @@
           <TextView android:id="@+id/tvSpeedUnit" android:layout_width="wrap_content"
               android:layout_height="wrap_content" android:text="km/h"
               android:textSize="14sp" android:textColor="#0099BB" android:paddingEnd="6dp"/>
-          <!-- Fixed height + minWidth so it never clips -->
           <Button android:id="@+id/btnSpeedUnit" android:layout_width="wrap_content"
               android:layout_height="36dp" android:minWidth="56dp"
               android:text="km/h" android:textSize="11sp"
@@ -96,7 +91,6 @@
             android:includeFontPadding="false"/>
       </LinearLayout>
 
-      <!-- Right: alt + coords -->
       <LinearLayout android:layout_width="0dp" android:layout_weight="1"
           android:layout_height="wrap_content" android:orientation="vertical"
           android:gravity="end" android:paddingEnd="8dp">
@@ -128,13 +122,18 @@
         <Button android:id="@+id/btnAssignPort" android:layout_width="0dp"
             android:layout_weight="1" android:layout_height="56dp"
             android:text="Assign as PORT&#10;(M1+M2 Left)"
-            android:textSize="13sp" android:backgroundTint="#1A4A1A"
-            android:layout_marginEnd="5dp"/>
+            android:textSize="12sp" android:backgroundTint="#1A4A1A"
+            android:layout_marginEnd="4dp"/>
         <Button android:id="@+id/btnAssignStbd" android:layout_width="0dp"
             android:layout_weight="1" android:layout_height="56dp"
             android:text="Assign as STBD&#10;(M3+M4 Right)"
-            android:textSize="13sp" android:backgroundTint="#1A1A4A"
-            android:layout_marginStart="5dp"/>
+            android:textSize="12sp" android:backgroundTint="#1A1A4A"
+            android:layout_marginHorizontal="2dp"/>
+        <Button android:id="@+id/btnAssignRemote" android:layout_width="0dp"
+            android:layout_weight="1" android:layout_height="56dp"
+            android:text="Assign as&#10;REMOTE"
+            android:textSize="12sp" android:backgroundTint="#4A4A1A"
+            android:layout_marginStart="4dp"/>
       </LinearLayout>
 
       <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
@@ -169,7 +168,6 @@
         android:layout_height="wrap_content" android:orientation="vertical"
         android:visibility="gone">
 
-      <!-- 4-motor status bar: label | progress | % duty side-by-side, bigger text -->
       <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
           android:orientation="horizontal" android:background="#1A1A1A"
           android:padding="8dp" android:layout_marginBottom="6dp">
@@ -184,7 +182,6 @@
           <ProgressBar android:id="@+id/pbM1" style="?android:attr/progressBarStyleHorizontal"
               android:layout_width="match_parent" android:layout_height="12dp"
               android:progressTint="#44CC44" android:max="100"/>
-          <!-- % and duty side by side -->
           <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
               android:orientation="horizontal" android:gravity="center">
             <TextView android:id="@+id/tvM1Pct" android:layout_width="wrap_content"
@@ -268,8 +265,6 @@
         </LinearLayout>
       </LinearLayout>
 
-      <!-- Sync selector — 60dp tall, full-width, wrapped in its own ScrollView
-           guarantee so it CANNOT be cut off -->
       <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
           android:orientation="horizontal" android:layout_marginBottom="6dp">
         <Button android:id="@+id/btnSyncAll" android:layout_width="0dp"
@@ -296,7 +291,6 @@
             android:text="MASTER THROTTLE" android:textColor="#CCCCCC"
             android:textSize="12sp" android:textStyle="bold" android:paddingBottom="6dp"/>
 
-        <!-- Master: ▼  slider  ▲  value — bigger buttons -->
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
             android:orientation="horizontal" android:gravity="center_vertical"
             android:paddingBottom="10dp">
@@ -316,7 +310,6 @@
               android:paddingStart="4dp"/>
         </LinearLayout>
 
-        <!-- Side trim — bigger buttons -->
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
             android:text="SIDE TRIM" android:textColor="#888888"
             android:textSize="11sp" android:paddingBottom="6dp"/>
@@ -358,7 +351,6 @@
               android:paddingStart="4dp"/>
         </LinearLayout>
 
-        <!-- Port / Stbd pct -->
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
             android:orientation="horizontal" android:paddingTop="8dp">
           <TextView android:id="@+id/tvPortPct" android:layout_width="0dp"
@@ -432,7 +424,7 @@
         </LinearLayout>
       </LinearLayout>
 
-      <!-- ── SYNC_NONE panel: 4 columns ── -->
+      <!-- ── SYNC_NONE panel ── -->
       <LinearLayout android:id="@+id/layoutSyncNone" android:layout_width="match_parent"
           android:layout_height="wrap_content" android:orientation="horizontal"
           android:background="#181818" android:padding="8dp"
@@ -523,7 +515,7 @@
         </LinearLayout>
       </LinearLayout>
 
-      <!-- ── F/R trim (SYNC_ALL and SYNC_SIDE) — bigger buttons ── -->
+      <!-- ── F/R trim ── -->
       <LinearLayout android:id="@+id/layoutFRTrim" android:layout_width="match_parent"
           android:layout_height="wrap_content" android:orientation="horizontal"
           android:background="#181818" android:padding="8dp"
@@ -568,6 +560,6 @@
           android:textSize="18sp" android:textStyle="bold"
           android:backgroundTint="#CC0000" android:enabled="false"/>
 
-    </LinearLayout><!-- end layoutDual -->
+    </LinearLayout>
   </LinearLayout>
 </ScrollView>
