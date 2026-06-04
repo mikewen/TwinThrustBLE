@@ -35,13 +35,12 @@ import java.util.Locale
  * Motor layout:
  *   Port  BLE → M1 (front-left) + M2 (rear-left)
  *   Stbd  BLE → M3 (front-right) + M4 (rear-right)
+ *   Front BLE → M5 + M6 (aux front)
  *
  * Sync levels:
- *   SYNC_ALL  — master ▼▲ + slider drives all 4. Side trim (L/R). F/R trim per side.
+ *   SYNC_ALL  — master ▼▲ + slider drives all motors. Side trim (L/R). F/R trim per side.
  *   SYNC_SIDE — port ▼▲ + slider → M1+M2; stbd ▼▲ + slider → M3+M4. F/R trim per side.
- *   SYNC_NONE — four independent ▼▲ + sliders: M1, M2, M3, M4.
- *
- * Status bar: always visible, shows M1–M4 progress bar + % + raw PWM duty.
+ *   SYNC_NONE — independent ▼▲ + sliders.
  */
 class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
@@ -58,11 +57,13 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var singleConnected = false
     private var singleRole   = ROLE_NONE
 
-    // Dual-mode
+    // Multi-mode
     private lateinit var portBle: AC6328BleManager
     private lateinit var stbdBle: AC6328BleManager
+    private lateinit var frontBle: AC6328BleManager
     private var portConnected = false
     private var stbdConnected = false
+    private var frontConnected = false
 
     private var escMode = true
 
@@ -73,6 +74,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var masterVal    = 0
     private var portSideTrim = 0
     private var stbdSideTrim = 0
+    private var frontTrim    = 0
     private var portFRTrim   = 0
     private var stbdFRTrim   = 0
 
@@ -83,6 +85,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // SYNC_NONE
     private var m1Val = 0; private var m2Val = 0
     private var m3Val = 0; private var m4Val = 0
+    private var m5Val = 0; private var m6Val = 0
 
     private val TRIM_RANGE_ESC  = 100
     private val TRIM_RANGE_BLDC = 500
@@ -136,6 +139,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             MODE_DUAL   -> {
                 if (::portBle.isInitialized) { portBle.disconnect().enqueue(); portBle.close() }
                 if (::stbdBle.isInitialized) { stbdBle.disconnect().enqueue(); stbdBle.close() }
+                if (::frontBle.isInitialized) { frontBle.disconnect().enqueue(); frontBle.close() }
             }
         }
         remote?.disconnect()?.enqueue()
@@ -171,8 +175,6 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             handleRemoteCommand(cmd)
         }
 
-        // Auto-connect to first Lookbon found in bonded devices or recent scan?
-        // For simplicity, scan briefly or just check bonded
         val bm = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         val adapter = bm.adapter
         val savedAddr = prefs.getString(MainActivity.KEY_LOOKBON_ADDR, "") ?: ""
@@ -187,7 +189,6 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
 
-        // Fallback to bonded devices
         @SuppressLint("MissingPermission")
         val bonded = adapter.bondedDevices
         val lookbon = bonded?.find { dev ->
@@ -340,11 +341,13 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         val portAddr = prefs.getString(MainActivity.KEY_PORT_ADDR, "") ?: ""
         val stbdAddr = prefs.getString(MainActivity.KEY_STBD_ADDR, "") ?: ""
+        val frontAddr = prefs.getString(MainActivity.KEY_FRONT_ADDR, "") ?: ""
         val remoteAddr = prefs.getString(MainActivity.KEY_LOOKBON_ADDR, "") ?: ""
         
         singleRole = when (singleDevice?.address) {
             portAddr -> ROLE_PORT
             stbdAddr -> ROLE_STBD
+            frontAddr -> ROLE_FRONT
             remoteAddr -> ROLE_REMOTE
             else -> ROLE_NONE
         }
@@ -400,6 +403,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         binding.btnAssignPort.setOnClickListener { assignSingle(ROLE_PORT) }
         binding.btnAssignStbd.setOnClickListener { assignSingle(ROLE_STBD) }
+        binding.btnAssignFront.setOnClickListener { assignSingle(ROLE_FRONT) }
         binding.btnAssignRemote.setOnClickListener { assignSingle(ROLE_REMOTE) }
         
         binding.btnSingleStop.setOnClickListener {
@@ -418,62 +422,58 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 binding.tvAssignBanner.text =
                     "✅ Assigned as PORT (Left) — M1+M2\nSpin to verify, then go back and connect Starboard."
                 binding.tvAssignBanner.setBackgroundColor(0xFF1A3A1A.toInt())
-                binding.btnAssignPort.alpha = 0.4f; binding.btnAssignStbd.alpha = 1f; binding.btnAssignRemote.alpha = 1f
             }
             ROLE_STBD -> {
                 binding.tvAssignBanner.text =
                     "✅ Assigned as STARBOARD (Right) — M3+M4\nSpin to verify, then go back and connect Port."
                 binding.tvAssignBanner.setBackgroundColor(0xFF1A1A3A.toInt())
-                binding.btnAssignPort.alpha = 1f; binding.btnAssignStbd.alpha = 0.4f; binding.btnAssignRemote.alpha = 1f
+            }
+            ROLE_FRONT -> {
+                binding.tvAssignBanner.text =
+                    "✅ Assigned as FRONT — M5+M6\nSpin to verify, then go back and connect others."
+                binding.tvAssignBanner.setBackgroundColor(0xFF1A3A3A.toInt())
             }
             ROLE_REMOTE -> {
                 binding.tvAssignBanner.text =
                     "✅ Assigned as LOOKBON REMOTE\nThis device will now control both sides in Launch mode."
                 binding.tvAssignBanner.setBackgroundColor(0xFF4A4A1A.toInt())
-                binding.btnAssignPort.alpha = 1f; binding.btnAssignStbd.alpha = 1f; binding.btnAssignRemote.alpha = 0.4f
             }
             else -> {
                 binding.tvAssignBanner.text =
                     "⚠ Not assigned — spin motors to identify this side, then assign below."
                 binding.tvAssignBanner.setBackgroundColor(0xFF2A2000.toInt())
-                binding.btnAssignPort.alpha = 1f; binding.btnAssignStbd.alpha = 1f; binding.btnAssignRemote.alpha = 1f
             }
         }
+        binding.btnAssignPort.alpha = if (singleRole == ROLE_PORT) 0.4f else 1f
+        binding.btnAssignStbd.alpha = if (singleRole == ROLE_STBD) 0.4f else 1f
+        binding.btnAssignFront.alpha = if (singleRole == ROLE_FRONT) 0.4f else 1f
+        binding.btnAssignRemote.alpha = if (singleRole == ROLE_REMOTE) 0.4f else 1f
     }
 
     private fun assignSingle(role: String) {
         val addr = singleDevice?.address ?: return
+        val editor = prefs.edit()
+        
+        // Remove from other roles if it was assigned there
+        if (prefs.getString(MainActivity.KEY_PORT_ADDR, "") == addr) editor.remove(MainActivity.KEY_PORT_ADDR).remove(MainActivity.KEY_PORT_NAME)
+        if (prefs.getString(MainActivity.KEY_STBD_ADDR, "") == addr) editor.remove(MainActivity.KEY_STBD_ADDR).remove(MainActivity.KEY_STBD_NAME)
+        if (prefs.getString(MainActivity.KEY_FRONT_ADDR, "") == addr) editor.remove(MainActivity.KEY_FRONT_ADDR).remove(MainActivity.KEY_FRONT_NAME)
+        if (prefs.getString(MainActivity.KEY_LOOKBON_ADDR, "") == addr) editor.remove(MainActivity.KEY_LOOKBON_ADDR).remove(MainActivity.KEY_LOOKBON_NAME)
+
         when (role) {
-            ROLE_PORT -> {
-                if (prefs.getString(MainActivity.KEY_STBD_ADDR, "") == addr)
-                    prefs.edit().remove(MainActivity.KEY_STBD_ADDR).remove(MainActivity.KEY_STBD_NAME).apply()
-                if (prefs.getString(MainActivity.KEY_LOOKBON_ADDR, "") == addr)
-                    prefs.edit().remove(MainActivity.KEY_LOOKBON_ADDR).remove(MainActivity.KEY_LOOKBON_NAME).apply()
-                prefs.edit().putString(MainActivity.KEY_PORT_ADDR, addr)
-                    .putString(MainActivity.KEY_PORT_NAME, singleName).apply()
-            }
-            ROLE_STBD -> {
-                if (prefs.getString(MainActivity.KEY_PORT_ADDR, "") == addr)
-                    prefs.edit().remove(MainActivity.KEY_PORT_ADDR).remove(MainActivity.KEY_PORT_NAME).apply()
-                if (prefs.getString(MainActivity.KEY_LOOKBON_ADDR, "") == addr)
-                    prefs.edit().remove(MainActivity.KEY_LOOKBON_ADDR).remove(MainActivity.KEY_LOOKBON_NAME).apply()
-                prefs.edit().putString(MainActivity.KEY_STBD_ADDR, addr)
-                    .putString(MainActivity.KEY_STBD_NAME, singleName).apply()
-            }
-            ROLE_REMOTE -> {
-                if (prefs.getString(MainActivity.KEY_PORT_ADDR, "") == addr)
-                    prefs.edit().remove(MainActivity.KEY_PORT_ADDR).remove(MainActivity.KEY_PORT_NAME).apply()
-                if (prefs.getString(MainActivity.KEY_STBD_ADDR, "") == addr)
-                    prefs.edit().remove(MainActivity.KEY_STBD_ADDR).remove(MainActivity.KEY_STBD_NAME).apply()
-                prefs.edit().putString(MainActivity.KEY_LOOKBON_ADDR, addr)
-                    .putString(MainActivity.KEY_LOOKBON_NAME, singleName).apply()
-            }
+            ROLE_PORT -> editor.putString(MainActivity.KEY_PORT_ADDR, addr).putString(MainActivity.KEY_PORT_NAME, singleName)
+            ROLE_STBD -> editor.putString(MainActivity.KEY_STBD_ADDR, addr).putString(MainActivity.KEY_STBD_NAME, singleName)
+            ROLE_FRONT -> editor.putString(MainActivity.KEY_FRONT_ADDR, addr).putString(MainActivity.KEY_FRONT_NAME, singleName)
+            ROLE_REMOTE -> editor.putString(MainActivity.KEY_LOOKBON_ADDR, addr).putString(MainActivity.KEY_LOOKBON_NAME, singleName)
         }
+        editor.apply()
+        
         singleRole = role
         refreshAssignBanner()
         val roleLabel = when(role) {
             ROLE_PORT -> "PORT ⬅ (M1+M2)"
             ROLE_STBD -> "STBD ➡ (M3+M4)"
+            ROLE_FRONT -> "FRONT (M5+M6)"
             ROLE_REMOTE -> "REMOTE"
             else -> ""
         }
@@ -482,7 +482,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         speak("Assigned $roleLabel")
     }
 
-    // ── Dual mode ─────────────────────────────────────────────────────────────
+    // ── Dual/Multi mode ─────────────────────────────────────────────────────────────
 
     @SuppressLint("MissingPermission")
     private fun initDualMode() {
@@ -490,12 +490,15 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val portName = intent.getStringExtra(EXTRA_PORT_NAME) ?: prefs.getString(MainActivity.KEY_PORT_NAME, "") ?: "Port"
         val stbdAddr = intent.getStringExtra(EXTRA_STBD_ADDR) ?: prefs.getString(MainActivity.KEY_STBD_ADDR, "") ?: ""
         val stbdName = intent.getStringExtra(EXTRA_STBD_NAME) ?: prefs.getString(MainActivity.KEY_STBD_NAME, "") ?: "Stbd"
+        val frontAddr = intent.getStringExtra(EXTRA_FRONT_ADDR) ?: prefs.getString(MainActivity.KEY_FRONT_ADDR, "") ?: ""
+        val frontName = intent.getStringExtra(EXTRA_FRONT_NAME) ?: prefs.getString(MainActivity.KEY_FRONT_NAME, "") ?: "Front"
 
         binding.tvPortLabel.text = "\u2b05 $portName"
         binding.tvStbdLabel.text = "$stbdName \u27a1"
 
         portBle = AC6328BleManager(this)
         stbdBle = AC6328BleManager(this)
+        frontBle = AC6328BleManager(this)
 
         val bm = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         val adapter = bm.adapter
@@ -512,6 +515,12 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 onConnected    = { stbdConnected = true; runOnUiThread { updateConnUi(); vibrate(50); speak("Starboard connected") } },
                 onDisconnected = { stbdConnected = false; runOnUiThread { updateConnUi(); speak("Starboard lost") } },
                 battCallback   = { p -> runOnUiThread { binding.tvStbdBatt.text = "$p%" } }
+            )
+        }
+        if (frontAddr.isNotEmpty()) {
+            connectBleDevice(frontBle, adapter.getRemoteDevice(frontAddr), frontName,
+                onConnected    = { frontConnected = true; runOnUiThread { updateConnUi(); vibrate(50); speak("Front connected") } },
+                onDisconnected = { frontConnected = false; runOnUiThread { updateConnUi(); speak("Front lost") } }
             )
         }
 
@@ -563,7 +572,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             resetAllThrottle()
             when (mode) {
                 MODE_SINGLE -> singleBle.applyMode()
-                MODE_DUAL   -> { portBle.applyMode(); stbdBle.applyMode() }
+                MODE_DUAL   -> { portBle.applyMode(); stbdBle.applyMode(); frontBle.applyMode() }
             }
             safeStopAll()
             updateSliderRanges()
@@ -572,7 +581,16 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun AC6328BleManager.applyMode() = if (escMode) setEscMode() else setBldcMode()
+    private fun AC6328BleManager.applyMode() {
+        if (escMode) {
+            setEscMode()
+            armEsc() // Send initial arming signals
+            handler.postDelayed({ armEsc() }, 500)   // Repeat arm signal for robustness
+            handler.postDelayed({ armEsc() }, 1000)
+        } else {
+            setBldcMode()
+        }
+    }
 
     // ── Sync controls ─────────────────────────────────────────────────────────
 
@@ -603,8 +621,12 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         setupHoldButton(binding.btnPortSideTrimDown) { portSideTrim -= trimStep(); clampSideTrims(); sendThrust(); updateThrustUi() }
         setupHoldButton(binding.btnStbdSideTrimUp)   { stbdSideTrim += trimStep(); clampSideTrims(); sendThrust(); updateThrustUi() }
         setupHoldButton(binding.btnStbdSideTrimDown) { stbdSideTrim -= trimStep(); clampSideTrims(); sendThrust(); updateThrustUi() }
+
+        setupHoldButton(binding.btnFrontTrimUp)      { frontTrim += trimStep(); clampFrontTrim(); sendThrust(); updateThrustUi() }
+        setupHoldButton(binding.btnFrontTrimDown)    { frontTrim -= trimStep(); clampFrontTrim(); sendThrust(); updateThrustUi() }
+
         binding.btnResetTrims.setOnClickListener {
-            portSideTrim = 0; stbdSideTrim = 0; portFRTrim = 0; stbdFRTrim = 0
+            portSideTrim = 0; stbdSideTrim = 0; frontTrim = 0; portFRTrim = 0; stbdFRTrim = 0
             sendThrust(); updateThrustUi()
             speak("Trims reset")
         }
@@ -615,7 +637,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         setupHoldButton(binding.btnStbdFRTrimUp)   { stbdFRTrim += trimStep(); clampFRTrims(); sendThrust(); updateThrustUi() }
         setupHoldButton(binding.btnStbdFRTrimDown) { stbdFRTrim -= trimStep(); clampFRTrims(); sendThrust(); updateThrustUi() }
 
-        // ── SYNC_SIDE: port ▼▲ + slider ──
+        // ── SYNC_SIDE: port/stbd ▼▲ + slider ──
         setupThrottleButtons(
             btnUp   = binding.btnPortSideUp,
             btnDown = binding.btnPortSideDown,
@@ -647,7 +669,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             stbdSideVal = stopValue() + p; sendThrust(); updateThrustUi()
         })
 
-        // ── SYNC_NONE: M1–M4 ▼▲ + sliders ──
+        // ── SYNC_NONE: M1–M6 ▼▲ + sliders ──
         data class MConfig(val up: android.widget.Button, val dn: android.widget.Button,
                            val seek: SeekBar, val get: () -> Int, val set: (Int) -> Unit)
         val motors = listOf(
@@ -659,6 +681,10 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 { m3Val }, { v -> m3Val = v.coerceIn(stopValue(), maxValue()); binding.seekM3.progress = (m3Val - stopValue()).coerceAtLeast(0); sendThrust(); updateThrustUi() }),
             MConfig(binding.btnM4Up, binding.btnM4Down, binding.seekM4,
                 { m4Val }, { v -> m4Val = v.coerceIn(stopValue(), maxValue()); binding.seekM4.progress = (m4Val - stopValue()).coerceAtLeast(0); sendThrust(); updateThrustUi() }),
+            MConfig(binding.btnM5Up, binding.btnM5Down, binding.seekM5,
+                { m5Val }, { v -> m5Val = v.coerceIn(stopValue(), maxValue()); binding.seekM5.progress = (m5Val - stopValue()).coerceAtLeast(0); sendThrust(); updateThrustUi() }),
+            MConfig(binding.btnM6Up, binding.btnM6Down, binding.seekM6,
+                { m6Val }, { v -> m6Val = v.coerceIn(stopValue(), maxValue()); binding.seekM6.progress = (m6Val - stopValue()).coerceAtLeast(0); sendThrust(); updateThrustUi() }),
         )
         for (m in motors) {
             setupThrottleButtons(m.up, m.dn, m.get, m.set)
@@ -667,7 +693,6 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 m.set(stopValue() + p)
             })
         }
-
         updateSliderRanges()
     }
 
@@ -708,10 +733,14 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun setSyncLevel(level: String) {
         val pf = computePortFront(); val sr = computeStbdFront()
+        val af = computeAuxFront()
         when (level) {
             SYNC_SIDE -> { portSideVal = pf; stbdSideVal = sr }
-            SYNC_NONE -> { m1Val = computePortFront(); m2Val = computePortRear()
-                m3Val = computeStbdFront(); m4Val = computeStbdRear() }
+            SYNC_NONE -> { 
+                m1Val = computePortFront(); m2Val = computePortRear()
+                m3Val = computeStbdFront(); m4Val = computeStbdRear()
+                m5Val = computeAuxFront(); m6Val = computeAuxFront()
+            }
         }
         syncLevel = level
         applySyncLevel()
@@ -736,7 +765,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val range = maxValue() - stopValue()
         binding.seekMaster.max = 100
         listOf(binding.seekPort, binding.seekStbd,
-            binding.seekM1, binding.seekM2, binding.seekM3, binding.seekM4)
+            binding.seekM1, binding.seekM2, binding.seekM3, binding.seekM4, binding.seekM5, binding.seekM6)
             .forEach { it.max = range }
     }
 
@@ -762,6 +791,11 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         SYNC_SIDE -> (stbdSideVal - stbdFRTrim).coerceIn(stopValue(), maxValue())
         else      -> m4Val.coerceIn(stopValue(), maxValue())
     }
+    private fun computeAuxFront() = when (syncLevel) {
+        SYNC_ALL  -> (masterVal + frontTrim).coerceIn(stopValue(), maxValue())
+        SYNC_SIDE -> (((computePortFront() + computeStbdFront()) / 2) + frontTrim).coerceIn(stopValue(), maxValue())
+        else      -> m5Val.coerceIn(stopValue(), maxValue())
+    }
 
     // ── Send thrust ───────────────────────────────────────────────────────────
 
@@ -773,12 +807,16 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun sendThrust() {
         val m1 = computePortFront(); val m2 = computePortRear()
         val m3 = computeStbdFront(); val m4 = computeStbdRear()
+        val m5 = computeAuxFront(); val m6 = computeAuxFront() // m6 follows m5 for now
+        
         if (escMode) {
             if (portConnected) portBle.sendEscPwm(m1, m2)
             if (stbdConnected) stbdBle.sendEscPwm(m3, m4)
+            if (frontConnected) frontBle.sendEscPwm(m5, m6)
         } else {
             if (portConnected) portBle.sendBldc(m1, m2)
             if (stbdConnected) stbdBle.sendBldc(m3, m4)
+            if (frontConnected) frontBle.sendBldc(m5, m6)
         }
     }
 
@@ -788,6 +826,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             if (mode == MODE_DUAL) {
                 if (::portBle.isInitialized) portBle.stopMotors()
                 if (::stbdBle.isInitialized) stbdBle.stopMotors()
+                if (::frontBle.isInitialized) frontBle.stopMotors()
             }
         }
     }
@@ -800,14 +839,14 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 binding.tvPortStatus.text = if (singleConnected) "✅ Connected" else "⚠ Connecting..."
                 binding.tvPortStatus.setTextColor(if (singleConnected) 0xFF66FF66.toInt() else 0xFFFF6666.toInt())
                 binding.tvStbdStatus.visibility = View.GONE
-                binding.btnSingleStop.isEnabled = singleConnected
+                binding.btnSingleStop.isEnabled = true
             }
             MODE_DUAL -> {
                 binding.tvPortStatus.text = if (portConnected) "✅" else "⚠"
                 binding.tvStbdStatus.text = if (stbdConnected) "✅" else "⚠"
                 binding.tvPortStatus.setTextColor(if (portConnected) 0xFF66FF66.toInt() else 0xFFFF6666.toInt())
                 binding.tvStbdStatus.setTextColor(if (stbdConnected) 0xFF66FF66.toInt() else 0xFFFF6666.toInt())
-                binding.btnStop.isEnabled = portConnected || stbdConnected
+                binding.btnStop.isEnabled = true
             }
         }
     }
@@ -818,6 +857,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         val m1 = computePortFront(); val m2 = computePortRear()
         val m3 = computeStbdFront(); val m4 = computeStbdRear()
+        val m5 = computeAuxFront(); val m6 = computeAuxFront()
 
         // Status bar (always visible) — % AND raw duty
         fun dutyLabel(v: Int) = if (escMode) "${v}u" else "${v}"
@@ -825,6 +865,12 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         binding.pbM2.progress   = nativeToPercent(m2); binding.tvM2Pct.text  = "${nativeToPercent(m2)}%"; binding.tvM2Duty.text = dutyLabel(m2)
         binding.pbM3.progress   = nativeToPercent(m3); binding.tvM3Pct.text  = "${nativeToPercent(m3)}%"; binding.tvM3Duty.text = dutyLabel(m3)
         binding.pbM4.progress   = nativeToPercent(m4); binding.tvM4Pct.text  = "${nativeToPercent(m4)}%"; binding.tvM4Duty.text = dutyLabel(m4)
+        
+        // Optional M5/M6 display if present in layout
+        try {
+            binding.pbM5.progress = nativeToPercent(m5); binding.tvM5Pct.text = "${nativeToPercent(m5)}%"; binding.tvM5Duty.text = dutyLabel(m5)
+            binding.pbM6.progress = nativeToPercent(m6); binding.tvM6Pct.text = "${nativeToPercent(m6)}%"; binding.tvM6Duty.text = dutyLabel(m6)
+        } catch (e: Exception) {}
 
         // Master pct (SYNC_ALL)
         binding.tvMasterPct.text = "${nativeToPercent(masterVal)}%"
@@ -837,18 +883,23 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // Trim labels
         binding.tvPortSideTrimVal.text = fmtTrim(portSideTrim)
         binding.tvStbdSideTrimVal.text = fmtTrim(stbdSideTrim)
+        binding.tvFrontTrimVal.text    = fmtTrim(frontTrim)
         binding.tvPortFRTrimVal.text   = fmtTrim(portFRTrim)
         binding.tvStbdFRTrimVal.text   = fmtTrim(stbdFRTrim)
 
         // Side pct in SYNC_SIDE panel
-        binding.tvPortSidePct.text = "$lPct%"
-        binding.tvStbdSidePct.text = "$rPct%"
+        binding.tvPortSidePct.text = "${nativeToPercent(m1)}%"
+        binding.tvStbdSidePct.text = "${nativeToPercent(m3)}%"
 
         // Indep pcts
         binding.tvM1OnlyPct.text = "${nativeToPercent(m1)}%"
         binding.tvM2OnlyPct.text = "${nativeToPercent(m2)}%"
         binding.tvM3OnlyPct.text = "${nativeToPercent(m3)}%"
         binding.tvM4OnlyPct.text = "${nativeToPercent(m4)}%"
+        try {
+            binding.tvM5OnlyPct.text = "${nativeToPercent(m5)}%"
+            binding.tvM6OnlyPct.text = "${nativeToPercent(m6)}%"
+        } catch (e: Exception) {}
     }
 
     // ── GPS ───────────────────────────────────────────────────────────────────
@@ -883,6 +934,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             binding.seekPort.progress = 0; binding.seekStbd.progress = 0
             binding.seekM1.progress = 0; binding.seekM2.progress = 0
             binding.seekM3.progress = 0; binding.seekM4.progress = 0
+            try { binding.seekM5.progress = 0; binding.seekM6.progress = 0 } catch (e: Exception) {}
             updateThrustUi(); vibrate(200)
         }
     }
@@ -904,6 +956,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 if (mode == MODE_DUAL) {
                     if (portConnected) portBle.readStatus()
                     if (stbdConnected) stbdBle.readStatus()
+                    if (frontConnected) frontBle.readStatus()
                 }
                 handler.postDelayed(this, FEEDBACK_POLL_MS)
             }
@@ -969,15 +1022,19 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         portSideTrim = portSideTrim.coerceIn(-trimRange(), trimRange())
         stbdSideTrim = stbdSideTrim.coerceIn(-trimRange(), trimRange())
     }
+    private fun clampFrontTrim() {
+        frontTrim = frontTrim.coerceIn(-trimRange(), trimRange())
+    }
     private fun clampFRTrims() {
         portFRTrim = portFRTrim.coerceIn(-trimRange(), trimRange())
         stbdFRTrim = stbdFRTrim.coerceIn(-trimRange(), trimRange())
     }
 
     private fun resetAllThrottle() {
-        masterVal = 0; portSideTrim = 0; stbdSideTrim = 0; portFRTrim = 0; stbdFRTrim = 0
+        masterVal = 0; portSideTrim = 0; stbdSideTrim = 0; frontTrim = 0; portFRTrim = 0; stbdFRTrim = 0
         portSideVal = stopValue(); stbdSideVal = stopValue()
         m1Val = stopValue(); m2Val = stopValue(); m3Val = stopValue(); m4Val = stopValue()
+        m5Val = stopValue(); m6Val = stopValue()
     }
 
     private fun vibrate(ms: Long) {
@@ -1001,12 +1058,15 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         const val EXTRA_PORT_NAME   = "port_name"
         const val EXTRA_STBD_ADDR   = "stbd_addr"
         const val EXTRA_STBD_NAME   = "stbd_name"
+        const val EXTRA_FRONT_ADDR  = "front_addr"
+        const val EXTRA_FRONT_NAME  = "front_name"
 
         const val MODE_SINGLE = "single"
         const val MODE_DUAL   = "dual"
         const val ROLE_NONE   = ""
         const val ROLE_PORT   = "port"
         const val ROLE_STBD   = "stbd"
+        const val ROLE_FRONT  = "front"
         const val ROLE_REMOTE = "remote"
 
         const val SYNC_ALL  = "all"

@@ -11,33 +11,19 @@ import java.util.UUID
 /**
  * AC6328 / AC6329C BLE motor controller.
  *
- * Each BLE module drives TWO motors. Commands are sent as separate 3-byte packets,
- * one per motor:
- *
- *   Motor 1 (front):  [0x01, dutyLo, dutyHi]
- *   Motor 2 (rear):   [0x02, dutyLo, dutyHi]
+ * Each BLE module drives TWO motors using a 5-byte unified packet:
+ *   [CMD, m1Lo, m1Hi, m2Lo, m2Hi]
  *
  * Duty units are timer counts (little-endian 16-bit), NOT microseconds:
  *
- *   ESC mode  (0x01 / 0x02): duty 500–1000
+ *   ESC mode: duty 500–1000
  *     500  = 1000µs (stop / arm)
  *     750  = 1500µs (mid)
  *     1000 = 2000µs (full throttle)
  *
- *   BLDC mode (0x01 / 0x02): duty 0–10000
+ *   BLDC mode: duty 0–10000
  *     0     = 0%   (stop)
  *     10000 = 100% (full)
- *
- * Stop command: [0xFF, 0x00, 0x00] — stops both motors immediately.
- *
- * Service: ae00
- *   ae03 WRITE_WITHOUT_RESPONSE — 3-byte motor command packets
- *   ae02 NOTIFY                 — echo / CASIC GNSS stream
- *   ae10 READ | WRITE           — status read / mode switch write
- *
- * Mode switch (ae10 WRITE):
- *   0x01 → ESC mode
- *   0x02 → BLDC mode
  */
 class AC6328BleManager(context: Context) : BleManager(context) {
 
@@ -49,10 +35,10 @@ class AC6328BleManager(context: Context) : BleManager(context) {
         val CHAR_AE02_UUID = UUID.fromString("0000ae02-0000-1000-8000-00805f9b34fb")
         val CHAR_AE10_UUID = UUID.fromString("0000ae10-0000-1000-8000-00805f9b34fb")
 
-        // Per-motor command bytes
-        const val CMD_M1:   Byte = 0x01   // Motor 1 (front)
-        const val CMD_M2:   Byte = 0x02   // Motor 2 (rear)
-        const val CMD_STOP: Byte = 0xFF.toByte()
+        // Command bytes
+        const val CMD_ESC_PWM:   Byte = 0x01
+        const val CMD_BLDC_DUTY: Byte = 0x02
+        const val CMD_STOP:      Byte = 0xFF.toByte()
 
         // ESC duty range
         const val ESC_MIN     = 500    // 1000µs — stop / arm
@@ -105,38 +91,33 @@ class AC6328BleManager(context: Context) : BleManager(context) {
     // ── Commands ──────────────────────────────────────────────────────────────
 
     /**
-     * Send ESC PWM duty to both motors on this module.
-     * Sends two separate 3-byte packets: [0x01, m1Lo, m1Hi] then [0x02, m2Lo, m2Hi]
-     * duty range: 500 (stop/1000µs) – 1000 (full/2000µs)
+     * Send ESC PWM duty to both motors using 5-byte format:
+     * [0x01, m1_lo, m1_hi, m2_lo, m2_hi]
      */
     fun sendEscPwm(m1Duty: Int, m2Duty: Int) {
         val m1 = m1Duty.coerceIn(ESC_MIN, ESC_MAX)
         val m2 = m2Duty.coerceIn(ESC_MIN, ESC_MAX)
-        Log.d(TAG, "ESC m1=$m1 (${dutyToUs(m1)}µs)  m2=$m2 (${dutyToUs(m2)}µs)")
-        writeCommand(buildPacket(CMD_M1, m1))
-        writeCommand(buildPacket(CMD_M2, m2))
+        Log.d(TAG, "ESC 5-byte: m1=$m1, m2=$m2")
+        writeCommand(build5BytePacket(CMD_ESC_PWM, m1, m2))
     }
 
     /**
-     * Send BLDC duty to both motors on this module.
-     * Sends two separate 3-byte packets: [0x01, m1Lo, m1Hi] then [0x02, m2Lo, m2Hi]
-     * duty range: 0 (stop) – 10000 (100%)
+     * Send BLDC duty to both motors using 5-byte format:
+     * [0x02, m1_lo, m1_hi, m2_lo, m2_hi]
      */
     fun sendBldc(m1Duty: Int, m2Duty: Int) {
         val m1 = m1Duty.coerceIn(BLDC_MIN, BLDC_MAX)
         val m2 = m2Duty.coerceIn(BLDC_MIN, BLDC_MAX)
-        Log.d(TAG, "BLDC m1=$m1  m2=$m2")
-        writeCommand(buildPacket(CMD_M1, m1))
-        writeCommand(buildPacket(CMD_M2, m2))
+        Log.d(TAG, "BLDC 5-byte: m1=$m1, m2=$m2")
+        writeCommand(build5BytePacket(CMD_BLDC_DUTY, m1, m2))
     }
 
     /**
-     * Stop both motors — sends CMD_STOP [0xFF, 0x00, 0x00].
-     * One stop packet covers both motors.
+     * Stop both motors — sends 5-byte packet with CMD_STOP [0xFF, 0, 0, 0, 0].
      */
     fun stopMotors() {
-        Log.d(TAG, "STOP sent")
-        writeCommand(buildPacket(CMD_STOP, 0))
+        Log.d(TAG, "STOP sent (5-byte)")
+        writeCommand(build5BytePacket(CMD_STOP, 0, 0))
     }
 
     /** Switch firmware to ESC mode (write 0x01 to ae10) */
@@ -181,13 +162,14 @@ class AC6328BleManager(context: Context) : BleManager(context) {
     // ── Packet builder ────────────────────────────────────────────────────────
 
     /**
-     * Build a 3-byte command packet: [cmd, dutyLo, dutyHi]
-     * duty is a little-endian 16-bit value.
+     * Build a 5-byte command packet: [cmd, m1Lo, m1Hi, m2Lo, m2Hi]
      */
-    private fun buildPacket(cmd: Byte, duty: Int): ByteArray = byteArrayOf(
+    private fun build5BytePacket(cmd: Byte, m1: Int, m2: Int): ByteArray = byteArrayOf(
         cmd,
-        (duty and 0xFF).toByte(),
-        ((duty shr 8) and 0xFF).toByte()
+        (m1 and 0xFF).toByte(),
+        ((m1 shr 8) and 0xFF).toByte(),
+        (m2 and 0xFF).toByte(),
+        ((m2 shr 8) and 0xFF).toByte()
     )
 
     private fun writeCommand(bytes: ByteArray) {
@@ -200,20 +182,16 @@ class AC6328BleManager(context: Context) : BleManager(context) {
     // ── ae02 echo parser ──────────────────────────────────────────────────────
 
     private fun parseAe02Echo(bytes: ByteArray) {
-        if (bytes.size < 3) return
-        val cmd  = bytes[0]
-        val duty = (bytes[1].toInt() and 0xFF) or ((bytes[2].toInt() and 0xFF) shl 8)
-        // For backward compat, map CMD_M1 echo to echoPort, CMD_M2 to echoStbd
-        val (ep, es) = when (cmd) {
-            CMD_M1 -> Pair(duty, -1)
-            CMD_M2 -> Pair(-1, duty)
-            else   -> Pair(-1, -1)
-        }
+        if (bytes.size < 5) return
+        val cmd = bytes[0]
+        val m1  = (bytes[1].toInt() and 0xFF) or ((bytes[2].toInt() and 0xFF) shl 8)
+        val m2  = (bytes[3].toInt() and 0xFF) or ((bytes[4].toInt() and 0xFF) shl 8)
+        
         onFeedback?.invoke(FeedbackData(
             source   = "ae02-echo",
             echoCmd  = cmd.toInt() and 0xFF,
-            echoPort = ep,
-            echoStbd = es,
+            echoPort = m1,
+            echoStbd = m2,
             rawAe02  = bytes
         ))
     }

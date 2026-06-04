@@ -38,8 +38,8 @@ import com.twinthrustble.databinding.ItemDeviceBinding
  *   • "Show all" chip disables the name filter
  *   • Already-assigned MAC addresses are always hidden — no point re-connecting them here
  *
- * Flow: tap device → ControlActivity (SINGLE) → assign Port or Stbd → back → repeat
- * When both saved: "CONNECT BOTH & LAUNCH" → ControlActivity (DUAL)
+ * Flow: tap device → ControlActivity (SINGLE) → assign Port, Stbd, or Front → back → repeat
+ * When modules saved: "CONNECT & LAUNCH" → ControlActivity (DUAL/MULTI)
  */
 class MainActivity : AppCompatActivity() {
 
@@ -98,6 +98,10 @@ class MainActivity : AppCompatActivity() {
             prefs.edit().remove(KEY_STBD_ADDR).remove(KEY_STBD_NAME).apply()
             updateSavedUi()
         }
+        binding.btnClearFront.setOnClickListener {
+            prefs.edit().remove(KEY_FRONT_ADDR).remove(KEY_FRONT_NAME).apply()
+            updateSavedUi()
+        }
         binding.btnClearLookbon.setOnClickListener {
             prefs.edit().remove(KEY_LOOKBON_ADDR).remove(KEY_LOOKBON_NAME).apply()
             updateSavedUi()
@@ -121,6 +125,7 @@ class MainActivity : AppCompatActivity() {
     private fun assignedAddresses(): Set<String> = buildSet {
         prefs.getString(KEY_PORT_ADDR, "")?.takeIf { it.isNotEmpty() }?.let { add(it) }
         prefs.getString(KEY_STBD_ADDR, "")?.takeIf { it.isNotEmpty() }?.let { add(it) }
+        prefs.getString(KEY_FRONT_ADDR, "")?.takeIf { it.isNotEmpty() }?.let { add(it) }
         prefs.getString(KEY_LOOKBON_ADDR, "")?.takeIf { it.isNotEmpty() }?.let { add(it) }
     }
 
@@ -144,32 +149,38 @@ class MainActivity : AppCompatActivity() {
         val portName = prefs.getString(KEY_PORT_NAME, "") ?: ""
         val stbdAddr = prefs.getString(KEY_STBD_ADDR, "") ?: ""
         val stbdName = prefs.getString(KEY_STBD_NAME, "") ?: ""
+        val frontAddr = prefs.getString(KEY_FRONT_ADDR, "") ?: ""
+        val frontName = prefs.getString(KEY_FRONT_NAME, "") ?: ""
         val remoteAddr = prefs.getString(KEY_LOOKBON_ADDR, "") ?: ""
         val remoteName = prefs.getString(KEY_LOOKBON_NAME, "") ?: ""
 
         val portReady = portAddr.isNotEmpty()
         val stbdReady = stbdAddr.isNotEmpty()
+        val frontReady = frontAddr.isNotEmpty()
         val remoteReady = remoteAddr.isNotEmpty()
 
         binding.tvPortSaved.text = if (portReady) "\u2b05 PORT\n$portName\n$portAddr"
         else "\u2b05 PORT\n(not assigned)"
         binding.tvStbdSaved.text = if (stbdReady) "STBD \u27a1\n$stbdName\n$stbdAddr"
         else "STBD \u27a1\n(not assigned)"
+        binding.tvFrontSaved.text = if (frontReady) "\u2b06 FRONT\n$frontName\n$frontAddr"
+        else "FRONT (not assigned)"
         binding.tvLookbonSaved.text = if (remoteReady) "\uD83C\uDFAE REMOTE\n$remoteName\n$remoteAddr"
         else "REMOTE (not assigned)"
 
         binding.btnClearPort.visibility = if (portReady) View.VISIBLE else View.GONE
         binding.btnClearStbd.visibility = if (stbdReady) View.VISIBLE else View.GONE
+        binding.btnClearFront.visibility = if (frontReady) View.VISIBLE else View.GONE
         binding.btnClearLookbon.visibility = if (remoteReady) View.VISIBLE else View.GONE
 
-        val bothReady = portReady && stbdReady
-        binding.btnConnectBoth.isEnabled = bothReady
-        binding.btnConnectBoth.alpha = if (bothReady) 1f else 0.4f
+        val modulesReady = portReady && stbdReady
+        binding.btnConnectBoth.isEnabled = modulesReady
+        binding.btnConnectBoth.alpha = if (modulesReady) 1f else 0.4f
         binding.tvBothHint.text = when {
-            bothReady  -> "Both modules assigned — tap Launch to run all 4 motors."
+            modulesReady -> "Modules assigned — tap Launch to run motors."
             portReady  -> "Starboard not assigned. Connect it below and assign."
             stbdReady  -> "Port not assigned. Connect it below and assign."
-            else       -> "Scan, tap a device, then assign it as Port or Starboard."
+            else       -> "Scan, tap a device, then assign it as Port, Starboard, or Front."
         }
     }
 
@@ -189,15 +200,21 @@ class MainActivity : AppCompatActivity() {
         val portName = prefs.getString(KEY_PORT_NAME, "") ?: ""
         val stbdAddr = prefs.getString(KEY_STBD_ADDR, "") ?: ""
         val stbdName = prefs.getString(KEY_STBD_NAME, "") ?: ""
-        if (portAddr.isEmpty() || stbdAddr.isEmpty()) {
-            Toast.makeText(this, "Assign both modules first", Toast.LENGTH_SHORT).show(); return
+        val frontAddr = prefs.getString(KEY_FRONT_ADDR, "") ?: ""
+        val frontName = prefs.getString(KEY_FRONT_NAME, "") ?: ""
+
+        if (portAddr.isEmpty() && stbdAddr.isEmpty() && frontAddr.isEmpty()) {
+            Toast.makeText(this, "Assign at least one module first", Toast.LENGTH_SHORT).show(); return
         }
+
         startActivity(Intent(this, ControlActivity::class.java).apply {
             putExtra(ControlActivity.EXTRA_MODE, ControlActivity.MODE_DUAL)
             putExtra(ControlActivity.EXTRA_PORT_ADDR, portAddr)
             putExtra(ControlActivity.EXTRA_PORT_NAME, portName)
             putExtra(ControlActivity.EXTRA_STBD_ADDR, stbdAddr)
             putExtra(ControlActivity.EXTRA_STBD_NAME, stbdName)
+            putExtra(ControlActivity.EXTRA_FRONT_ADDR, frontAddr)
+            putExtra(ControlActivity.EXTRA_FRONT_NAME, frontName)
         })
     }
 
@@ -283,6 +300,8 @@ class MainActivity : AppCompatActivity() {
         const val KEY_PORT_NAME = "port_name"
         const val KEY_STBD_ADDR = "stbd_addr"
         const val KEY_STBD_NAME = "stbd_name"
+        const val KEY_FRONT_ADDR = "front_addr"
+        const val KEY_FRONT_NAME = "front_name"
         const val KEY_LOOKBON_ADDR = "lookbon_addr"
         const val KEY_LOOKBON_NAME = "lookbon_name"
     }
