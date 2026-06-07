@@ -90,6 +90,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val TRIM_RANGE_ESC  = 100
     private val TRIM_RANGE_BLDC = 500
     private val FEEDBACK_POLL_MS = 2_000L
+    private val COMMAND_LOOP_MS  = 300L   // for firmware watchdog
     private val HOLD_INTERVAL_MS = 150L   // faster ramp for hold
     private val STEP_SMALL_ESC  = 5       // per button press ESC
     private val STEP_SMALL_BLDC = 100     // per button press BLDC
@@ -124,6 +125,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         setupGps()
         setupBackPress()
         scheduleFeedbackPoll()
+        scheduleCommandLoop()
         updateConnUi()
 
         setupLookbonRemote()
@@ -368,6 +370,12 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         updateConnUi()
                         speak("$singleName lost")
                     } 
+                },
+                onFeedback = { data ->
+                    if (singleRole == ROLE_FRONT && data.currentAmps > 0.05f) {
+                        val watts = data.currentAmps * 48f
+                        Log.d("AC6328", "Front Single Current: ${data.currentAmps}A ($watts W)")
+                    }
                 })
         }
         showSingleUi()
@@ -507,20 +515,40 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             connectBleDevice(portBle, adapter.getRemoteDevice(portAddr), portName,
                 onConnected    = { portConnected = true; runOnUiThread { updateConnUi(); vibrate(50); speak("Port connected") } },
                 onDisconnected = { portConnected = false; runOnUiThread { updateConnUi(); speak("Port lost") } },
-                battCallback   = { p -> runOnUiThread { binding.tvPortBatt.text = "$p%" } }
+                onFeedback     = { data ->
+                    if (data.batteryMv > 0) {
+                        val p = portBle.battMvToPercent(data.batteryMv)
+                        runOnUiThread { binding.tvPortBatt.text = "$p%" }
+                    }
+                }
             )
         }
         if (stbdAddr.isNotEmpty()) {
             connectBleDevice(stbdBle, adapter.getRemoteDevice(stbdAddr), stbdName,
                 onConnected    = { stbdConnected = true; runOnUiThread { updateConnUi(); vibrate(50); speak("Starboard connected") } },
                 onDisconnected = { stbdConnected = false; runOnUiThread { updateConnUi(); speak("Starboard lost") } },
-                battCallback   = { p -> runOnUiThread { binding.tvStbdBatt.text = "$p%" } }
+                onFeedback     = { data ->
+                    if (data.batteryMv > 0) {
+                        val p = stbdBle.battMvToPercent(data.batteryMv)
+                        runOnUiThread { binding.tvStbdBatt.text = "$p%" }
+                    }
+                }
             )
         }
         if (frontAddr.isNotEmpty()) {
             connectBleDevice(frontBle, adapter.getRemoteDevice(frontAddr), frontName,
                 onConnected    = { frontConnected = true; runOnUiThread { updateConnUi(); vibrate(50); speak("Front connected") } },
-                onDisconnected = { frontConnected = false; runOnUiThread { updateConnUi(); speak("Front lost") } }
+                onDisconnected = { frontConnected = false; runOnUiThread { updateConnUi(); speak("Front lost") } },
+                onFeedback     = { data ->
+                    if (data.currentAmps > 0.05f) {
+                        val watts = data.currentAmps * 48f
+                        runOnUiThread {
+                            binding.tvFrontCurrent.text = "%.1fA (%.0fW)".format(data.currentAmps, watts)
+                        }
+                    } else if (data.rawAe10.startsWith("V")) {
+                        runOnUiThread { binding.tvFrontCurrent.text = "" }
+                    }
+                }
             )
         }
 
@@ -543,7 +571,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         name: String,
         onConnected: () -> Unit,
         onDisconnected: () -> Unit,
-        battCallback: ((Int) -> Unit)? = null
+        onFeedback: ((AC6328BleManager.FeedbackData) -> Unit)? = null
     ) {
         mgr.setConnectionObserver(object : ConnectionObserver {
             override fun onDeviceConnecting(d: BluetoothDevice) {}
@@ -553,11 +581,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             override fun onDeviceFailedToConnect(d: BluetoothDevice, reason: Int) { onDisconnected() }
             override fun onDeviceReady(d: BluetoothDevice) { mgr.applyMode() }
         })
-        battCallback?.let { cb ->
-            mgr.onFeedback = { data ->
-                if (data.batteryMv > 0) cb(mgr.battMvToPercent(data.batteryMv))
-            }
-        }
+        mgr.onFeedback = onFeedback
         mgr.connectToDevice(device)
     }
 
@@ -844,6 +868,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             MODE_DUAL -> {
                 binding.tvPortStatus.text = if (portConnected) "✅" else "⚠"
                 binding.tvStbdStatus.text = if (stbdConnected) "✅" else "⚠"
+                binding.tvFrontStatus.text = if (frontConnected) "FRONT ✅" else ""
                 binding.tvPortStatus.setTextColor(if (portConnected) 0xFF66FF66.toInt() else 0xFFFF6666.toInt())
                 binding.tvStbdStatus.setTextColor(if (stbdConnected) 0xFF66FF66.toInt() else 0xFFFF6666.toInt())
                 binding.btnStop.isEnabled = true
@@ -962,6 +987,22 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
         handler.postDelayed(r, FEEDBACK_POLL_MS)
+    }
+
+    private fun scheduleCommandLoop() {
+        val r = object : Runnable {
+            override fun run() {
+                if (mode == MODE_SINGLE && singleConnected) {
+                    sendSingle(masterVal)
+                } else if (mode == MODE_DUAL) {
+                    if (portConnected || stbdConnected || frontConnected) {
+                        sendThrust()
+                    }
+                }
+                handler.postDelayed(this, COMMAND_LOOP_MS)
+            }
+        }
+        handler.postDelayed(r, COMMAND_LOOP_MS)
     }
 
     // ── Back press ────────────────────────────────────────────────────────────

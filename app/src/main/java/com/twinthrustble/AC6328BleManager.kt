@@ -7,6 +7,7 @@ import android.content.Context
 import android.util.Log
 import no.nordicsemi.android.ble.BleManager
 import java.util.UUID
+import kotlin.math.abs
 
 /**
  * AC6328 / AC6329C BLE motor controller.
@@ -136,7 +137,7 @@ class AC6328BleManager(context: Context) : BleManager(context) {
         }
     }
 
-    /** Read ae10 status string: "M<mode>A<vbat_mv>T<uptime_min>" */
+    /** Read ae10 status string: "M<mode>A<vbat_mv>T<uptime_min>" or "V<mv>" for current */
     fun readStatus() {
         charAe10?.let {
             readCharacteristic(it).with { _, data ->
@@ -202,8 +203,23 @@ class AC6328BleManager(context: Context) : BleManager(context) {
         val mode      = Regex("M(\\d+)").find(raw)?.groupValues?.get(1)?.toIntOrNull() ?: 0
         val battMv    = Regex("A(\\d+)").find(raw)?.groupValues?.get(1)?.toIntOrNull() ?: 0
         val uptimeMin = Regex("T(\\d+)").find(raw)?.groupValues?.get(1)?.toIntOrNull() ?: -1
+
+        var currentAmps = 0.0f
+        if (raw.startsWith("V")) {
+            try {
+                val mvStr = raw.substring(1).filter { it.isDigit() }
+                if (mvStr.isNotEmpty()) {
+                    val mv = mvStr.toInt()
+                    currentAmps = abs(mv - 1650) / 55.0f
+                    Log.d(TAG, "RECV_CURR Raw: $raw, Amps: $currentAmps")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to parse current sensor string: $raw", e)
+            }
+        }
+
         return FeedbackData(source = "ae10-read", batteryMv = battMv,
-            uptimeMin = uptimeMin, rawAe10 = raw)
+            uptimeMin = uptimeMin, rawAe10 = raw, currentAmps = currentAmps)
     }
 
     // ── Connect helper ────────────────────────────────────────────────────────
@@ -222,7 +238,8 @@ class AC6328BleManager(context: Context) : BleManager(context) {
         val echoCmd:   Int       = -1,
         val echoPort:  Int       = -1,
         val echoStbd:  Int       = -1,
-        val rawAe02:   ByteArray = ByteArray(0)
+        val rawAe02:   ByteArray = ByteArray(0),
+        val currentAmps: Float   = 0.0f
     )
 
     // ── Utility ───────────────────────────────────────────────────────────────
