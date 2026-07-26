@@ -31,10 +31,19 @@ class AC6328BleManager(context: Context) : BleManager(context) {
     companion object {
         private const val TAG = "AC6328"
 
-        val SERVICE_UUID   = UUID.fromString("0000ae00-0000-1000-8000-00805f9b34fb")
+        // ae00 = AC6328/AC6329C modules; ae30 = ESC_PWM ESP32C3 firmware
+        val SERVICE_UUID_AE00 = UUID.fromString("0000ae00-0000-1000-8000-00805f9b34fb")
+        val SERVICE_UUID_AE30 = UUID.fromString("0000ae30-0000-1000-8000-00805f9b34fb")
         val CHAR_AE03_UUID = UUID.fromString("0000ae03-0000-1000-8000-00805f9b34fb")
         val CHAR_AE02_UUID = UUID.fromString("0000ae02-0000-1000-8000-00805f9b34fb")
         val CHAR_AE10_UUID = UUID.fromString("0000ae10-0000-1000-8000-00805f9b34fb")
+
+        // CC6903 current sensor parameters (CC6903SO-20A default)
+        // Module sends output voltage in millivolts via "C<mv>" token in ae10 string.
+        // Range: 0–3300mV maps to −Imax … 0A … +Imax
+        const val ADC_ZERO_MV     = 1650f   // mV  zero-current output = Vcc/2 = 1.65V
+        // Sensitivity in mV/A: 132 = 10A variant, 66 = 20A variant, 44 = 30A variant
+        const val ADC_SENSITIVITY_MV = 66f  // mV/A — CC6903SO-20A
 
         // Command bytes
         const val CMD_ESC_PWM:   Byte = 0x01
@@ -65,7 +74,10 @@ class AC6328BleManager(context: Context) : BleManager(context) {
     private inner class AC6328GattCallback : BleManagerGattCallback() {
 
         override fun isRequiredServiceSupported(gatt: BluetoothGatt): Boolean {
-            val svc = gatt.getService(SERVICE_UUID) ?: return false
+            // Try ae00 first (AC6328/AC6329C), fall back to ae30 (ESC_PWM ESP32C3)
+            val svc = gatt.getService(SERVICE_UUID_AE00)
+                ?: gatt.getService(SERVICE_UUID_AE30)
+                ?: return false
             charAe03 = svc.getCharacteristic(CHAR_AE03_UUID)
             charAe02 = svc.getCharacteristic(CHAR_AE02_UUID)
             charAe10 = svc.getCharacteristic(CHAR_AE10_UUID)
@@ -187,7 +199,7 @@ class AC6328BleManager(context: Context) : BleManager(context) {
         val cmd = bytes[0]
         val m1  = (bytes[1].toInt() and 0xFF) or ((bytes[2].toInt() and 0xFF) shl 8)
         val m2  = (bytes[3].toInt() and 0xFF) or ((bytes[4].toInt() and 0xFF) shl 8)
-        
+
         onFeedback?.invoke(FeedbackData(
             source   = "ae02-echo",
             echoCmd  = cmd.toInt() and 0xFF,
@@ -202,23 +214,32 @@ class AC6328BleManager(context: Context) : BleManager(context) {
     private fun parseAe10Status(raw: String): FeedbackData {
         val mode      = Regex("M(\\d+)").find(raw)?.groupValues?.get(1)?.toIntOrNull() ?: 0
         val battMv    = Regex("A(\\d+)").find(raw)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+        val adcRaw    = Regex("C(\\d+)").find(raw)?.groupValues?.get(1)?.toIntOrNull() ?: 0
         val uptimeMin = Regex("T(\\d+)").find(raw)?.groupValues?.get(1)?.toIntOrNull() ?: -1
 
+        // CC6903 hall-effect sensor: Vout = Vcc/2 + sensitivity * I
+        // zeroV = 1.65V (Vcc/2 at 0A), sensitivity: 0.132 V/A (10A), 0.066 (20A), 0.044 (30A)
+        // Default: CC6903SO-20A, 66 mV/A
+        // C<mv>: module sends CC6903 output voltage in millivolts
+        // Formula: I(A) = (Vout_mV − 1650) / sensitivity_mV_per_A
         var currentAmps = 0.0f
-        if (raw.startsWith("V")) {
+        if (adcRaw > 0) {
+            // adcRaw field carries millivolts (0–3300mV), not raw ADC counts
+            val amps = (adcRaw - ADC_ZERO_MV) / ADC_SENSITIVITY_MV
+            currentAmps = amps.coerceAtLeast(0f)
+            Log.d(TAG, "CC6903: ${adcRaw}mV → %.2fA".format(currentAmps))
+        } else if (raw.startsWith("V")) {
+            // Legacy "V<mv>" format — same formula
             try {
-                val mvStr = raw.substring(1).filter { it.isDigit() }
-                if (mvStr.isNotEmpty()) {
-                    val mv = mvStr.toInt()
-                    currentAmps = abs(mv - 1650) / 55.0f
-                    Log.d(TAG, "RECV_CURR Raw: $raw, Amps: $currentAmps")
-                }
+                val mv = raw.substring(1).filter { it.isDigit() }.toFloat()
+                currentAmps = ((mv - ADC_ZERO_MV) / ADC_SENSITIVITY_MV).coerceAtLeast(0f)
+                Log.d(TAG, "CC6903 V-format: ${raw} → %.2fA".format(currentAmps))
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to parse current sensor string: $raw", e)
+                Log.e(TAG, "Failed to parse V-format: $raw", e)
             }
         }
 
-        return FeedbackData(source = "ae10-read", batteryMv = battMv,
+        return FeedbackData(source = "ae10-read", batteryMv = battMv, adcRaw = adcRaw,
             uptimeMin = uptimeMin, rawAe10 = raw, currentAmps = currentAmps)
     }
 
@@ -231,15 +252,16 @@ class AC6328BleManager(context: Context) : BleManager(context) {
     // ── Feedback data ─────────────────────────────────────────────────────────
 
     data class FeedbackData(
-        val source:    String    = "",
-        val batteryMv: Int       = 0,
-        val uptimeMin: Int       = -1,
-        val rawAe10:   String    = "",
-        val echoCmd:   Int       = -1,
-        val echoPort:  Int       = -1,
-        val echoStbd:  Int       = -1,
-        val rawAe02:   ByteArray = ByteArray(0),
-        val currentAmps: Float   = 0.0f
+        val source:      String    = "",
+        val batteryMv:   Int       = 0,
+        val adcRaw:      Int       = 0,      // CC6903 output in millivolts (0 = not present)
+        val currentAmps: Float     = 0.0f,   // converted amps via CC6903 formula
+        val uptimeMin:   Int       = -1,
+        val rawAe10:     String    = "",
+        val echoCmd:     Int       = -1,
+        val echoPort:    Int       = -1,
+        val echoStbd:    Int       = -1,
+        val rawAe02:     ByteArray = ByteArray(0)
     )
 
     // ── Utility ───────────────────────────────────────────────────────────────

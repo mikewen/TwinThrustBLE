@@ -87,10 +87,19 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var m3Val = 0; private var m4Val = 0
     private var m5Val = 0; private var m6Val = 0
 
-    private val TRIM_RANGE_ESC  = 100
-    private val TRIM_RANGE_BLDC = 500
+    private val TRIM_MAX_ESC  = 100    // ±100 ESC units (symmetric)
+    private val TRIM_MIN_ESC  = -100
+    private val TRIM_MAX_BLDC = 500    // ±500 BLDC units (symmetric)
+    private val TRIM_MIN_BLDC = -500
     private val FEEDBACK_POLL_MS = 2_000L
     private val COMMAND_LOOP_MS  = 300L   // for firmware watchdog
+
+    // Current / power telemetry — updated from BLE onFeedback callbacks
+    @Volatile private var portAmps  = 0f
+    @Volatile private var stbdAmps  = 0f
+    @Volatile private var frontAmps = 0f
+    private val BUS_VOLTAGE = 51.2f   // LiFePO4 16S nominal
+
     private val HOLD_INTERVAL_MS = 150L   // faster ramp for hold
     private val STEP_SMALL_ESC  = 5       // per button press ESC
     private val STEP_SMALL_BLDC = 100     // per button press BLDC
@@ -345,7 +354,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val stbdAddr = prefs.getString(MainActivity.KEY_STBD_ADDR, "") ?: ""
         val frontAddr = prefs.getString(MainActivity.KEY_FRONT_ADDR, "") ?: ""
         val remoteAddr = prefs.getString(MainActivity.KEY_LOOKBON_ADDR, "") ?: ""
-        
+
         singleRole = when (singleDevice?.address) {
             portAddr -> ROLE_PORT
             stbdAddr -> ROLE_STBD
@@ -356,20 +365,20 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         singleDevice?.let {
             connectBleDevice(singleBle, it, singleName,
-                onConnected    = { 
+                onConnected    = {
                     singleConnected = true
-                    runOnUiThread { 
+                    runOnUiThread {
                         updateConnUi()
                         vibrate(50)
                         speak("$singleName connected")
-                    } 
+                    }
                 },
-                onDisconnected = { 
+                onDisconnected = {
                     singleConnected = false
-                    runOnUiThread { 
+                    runOnUiThread {
                         updateConnUi()
                         speak("$singleName lost")
-                    } 
+                    }
                 },
                 onFeedback = { data ->
                     if (singleRole == ROLE_FRONT && data.currentAmps > 0.05f) {
@@ -413,7 +422,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         binding.btnAssignStbd.setOnClickListener { assignSingle(ROLE_STBD) }
         binding.btnAssignFront.setOnClickListener { assignSingle(ROLE_FRONT) }
         binding.btnAssignRemote.setOnClickListener { assignSingle(ROLE_REMOTE) }
-        
+
         binding.btnSingleStop.setOnClickListener {
             singleBle.stopMotors()
             masterVal = 0
@@ -461,7 +470,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun assignSingle(role: String) {
         val addr = singleDevice?.address ?: return
         val editor = prefs.edit()
-        
+
         // Remove from other roles if it was assigned there
         if (prefs.getString(MainActivity.KEY_PORT_ADDR, "") == addr) editor.remove(MainActivity.KEY_PORT_ADDR).remove(MainActivity.KEY_PORT_NAME)
         if (prefs.getString(MainActivity.KEY_STBD_ADDR, "") == addr) editor.remove(MainActivity.KEY_STBD_ADDR).remove(MainActivity.KEY_STBD_NAME)
@@ -475,7 +484,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             ROLE_REMOTE -> editor.putString(MainActivity.KEY_LOOKBON_ADDR, addr).putString(MainActivity.KEY_LOOKBON_NAME, singleName)
         }
         editor.apply()
-        
+
         singleRole = role
         refreshAssignBanner()
         val roleLabel = when(role) {
@@ -520,6 +529,10 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         val p = portBle.battMvToPercent(data.batteryMv)
                         runOnUiThread { binding.tvPortBatt.text = "$p%" }
                     }
+                    if (data.currentAmps > 0f) {
+                        portAmps = data.currentAmps; pushTelemetry()
+                        runOnUiThread { updatePowerUi() }
+                    }
                 }
             )
         }
@@ -532,6 +545,10 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         val p = stbdBle.battMvToPercent(data.batteryMv)
                         runOnUiThread { binding.tvStbdBatt.text = "$p%" }
                     }
+                    if (data.currentAmps > 0f) {
+                        stbdAmps = data.currentAmps; pushTelemetry()
+                        runOnUiThread { updatePowerUi() }
+                    }
                 }
             )
         }
@@ -540,13 +557,13 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 onConnected    = { frontConnected = true; runOnUiThread { updateConnUi(); vibrate(50); speak("Front connected") } },
                 onDisconnected = { frontConnected = false; runOnUiThread { updateConnUi(); speak("Front lost") } },
                 onFeedback     = { data ->
-                    if (data.currentAmps > 0.05f) {
-                        val watts = data.currentAmps * 48f
+                    if (data.currentAmps > 0f) {
+                        frontAmps = data.currentAmps; pushTelemetry()
+                        val watts = frontAmps * BUS_VOLTAGE
                         runOnUiThread {
-                            binding.tvFrontCurrent.text = "%.1fA (%.0fW)".format(data.currentAmps, watts)
+                            binding.tvFrontCurrent.text = "%.1fA (%.0fW)".format(frontAmps, watts)
+                            updatePowerUi()
                         }
-                    } else if (data.rawAe10.startsWith("V")) {
-                        runOnUiThread { binding.tvFrontCurrent.text = "" }
                     }
                 }
             )
@@ -760,7 +777,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val af = computeAuxFront()
         when (level) {
             SYNC_SIDE -> { portSideVal = pf; stbdSideVal = sr }
-            SYNC_NONE -> { 
+            SYNC_NONE -> {
                 m1Val = computePortFront(); m2Val = computePortRear()
                 m3Val = computeStbdFront(); m4Val = computeStbdRear()
                 m5Val = computeAuxFront(); m6Val = computeAuxFront()
@@ -829,10 +846,11 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun sendThrust() {
+        pushTelemetry()  // keep CSV duty columns current
         val m1 = computePortFront(); val m2 = computePortRear()
         val m3 = computeStbdFront(); val m4 = computeStbdRear()
         val m5 = computeAuxFront(); val m6 = computeAuxFront() // m6 follows m5 for now
-        
+
         if (escMode) {
             if (portConnected) portBle.sendEscPwm(m1, m2)
             if (stbdConnected) stbdBle.sendEscPwm(m3, m4)
@@ -890,7 +908,7 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         binding.pbM2.progress   = nativeToPercent(m2); binding.tvM2Pct.text  = "${nativeToPercent(m2)}%"; binding.tvM2Duty.text = dutyLabel(m2)
         binding.pbM3.progress   = nativeToPercent(m3); binding.tvM3Pct.text  = "${nativeToPercent(m3)}%"; binding.tvM3Duty.text = dutyLabel(m3)
         binding.pbM4.progress   = nativeToPercent(m4); binding.tvM4Pct.text  = "${nativeToPercent(m4)}%"; binding.tvM4Duty.text = dutyLabel(m4)
-        
+
         // Optional M5/M6 display if present in layout
         try {
             binding.pbM5.progress = nativeToPercent(m5); binding.tvM5Pct.text = "${nativeToPercent(m5)}%"; binding.tvM5Duty.text = dutyLabel(m5)
@@ -932,10 +950,24 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun setupGps() {
         gpsManager = GpsManager(this)
         gpsManager.onUpdate = { data -> runOnUiThread { updateGpsUi(data) } }
+        gpsManager.onLogStatus = { msg -> runOnUiThread { binding.tvLogStatus.text = msg } }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
             == PackageManager.PERMISSION_GRANTED) gpsManager.startPhoneGps()
         else locationPermLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-        gpsManager.startLogging()
+        // Logging is OFF by default — user enables via switch
+        binding.switchLog.isChecked = false
+        binding.tvLogStatus.text = "Log: off"
+        binding.switchLog.setOnCheckedChangeListener { _, checked ->
+            if (checked) {
+                val path = gpsManager.startLogging()
+                binding.tvLogStatus.text = if (path != null) "Logging…" else "Log failed"
+                speak("Logging started")
+            } else {
+                gpsManager.stopLogging()
+                binding.tvLogStatus.text = "Log: off"
+                speak("Logging stopped")
+            }
+        }
         binding.btnSpeedUnit.text = if (speedUnitKnots) "kn" else "km/h"
     }
 
@@ -947,6 +979,32 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         binding.tvGpsHeading.text = if (data.hasHeading) "%.0f\u00b0%s".format(data.headingDeg, data.headingCardinal) else "\u2014"
         binding.tvGpsAlt.text     = if (data.hasFix) "%.0fm".format(data.altitudeM) else "\u2014"
         binding.tvGpsCoords.text  = if (data.hasFix) "%.4f\u00b0\n%.4f\u00b0".format(data.latDeg, data.lonDeg) else "\u2014"
+    }
+
+
+    // ── Power / current UI ────────────────────────────────────────────────────
+
+    /** Show combined current in port/stbd batt labels and front current field. */
+    private fun updatePowerUi() {
+        if (mode != MODE_DUAL) return
+        val totalAmps = portAmps + stbdAmps + frontAmps
+        if (portAmps  > 0f) binding.tvPortBatt.text = "⚡%.1fA".format(portAmps)
+        if (stbdAmps  > 0f) binding.tvStbdBatt.text = "⚡%.1fA".format(stbdAmps)
+        // frontAmps shown in tvFrontCurrent already via initDualMode onFeedback
+    }
+
+    /** Push current duty + current readings to GpsManager CSV logger. */
+    private fun pushTelemetry() {
+        if (!::gpsManager.isInitialized) return
+        val m1 = computePortFront(); val m2 = computePortRear()
+        val m3 = computeStbdFront(); val m4 = computeStbdRear()
+        val m5 = computeAuxFront();  val m6 = computeAuxFront()
+        gpsManager.updateTelemetry(GpsManager.TelemetrySnapshot(
+            dutyM1 = m1, dutyM2 = m2, dutyM3 = m3,
+            dutyM4 = m4, dutyM5 = m5, dutyM6 = m6,
+            portAmps   = portAmps,  stbdAmps   = stbdAmps, frontAmps = frontAmps,
+            powerWatts = (portAmps + stbdAmps + frontAmps) * BUS_VOLTAGE
+        ))
     }
 
     // ── Stop + unit buttons ───────────────────────────────────────────────────
@@ -1047,7 +1105,8 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun stopValue()  = if (escMode) AC6328BleManager.ESC_MIN  else AC6328BleManager.BLDC_MIN
     private fun maxValue()   = if (escMode) AC6328BleManager.ESC_MAX  else AC6328BleManager.BLDC_MAX
-    private fun trimRange()  = if (escMode) TRIM_RANGE_ESC             else TRIM_RANGE_BLDC
+    private fun trimMax() = if (escMode) TRIM_MAX_ESC  else TRIM_MAX_BLDC
+    private fun trimMin() = if (escMode) TRIM_MIN_ESC  else TRIM_MIN_BLDC
     private fun trimStep()   = if (escMode) 5                          else 50
     private fun fmtTrim(v: Int) = if (v >= 0) "+$v" else "$v"
 
@@ -1060,15 +1119,15 @@ class ControlActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun clampSideTrims() {
-        portSideTrim = portSideTrim.coerceIn(-trimRange(), trimRange())
-        stbdSideTrim = stbdSideTrim.coerceIn(-trimRange(), trimRange())
+        portSideTrim = portSideTrim.coerceIn(trimMin(), trimMax())
+        stbdSideTrim = stbdSideTrim.coerceIn(trimMin(), trimMax())
     }
     private fun clampFrontTrim() {
-        frontTrim = frontTrim.coerceIn(-trimRange(), trimRange())
+        frontTrim = frontTrim.coerceIn(trimMin(), trimMax())
     }
     private fun clampFRTrims() {
-        portFRTrim = portFRTrim.coerceIn(-trimRange(), trimRange())
-        stbdFRTrim = stbdFRTrim.coerceIn(-trimRange(), trimRange())
+        portFRTrim = portFRTrim.coerceIn(trimMin(), trimMax())
+        stbdFRTrim = stbdFRTrim.coerceIn(trimMin(), trimMax())
     }
 
     private fun resetAllThrottle() {

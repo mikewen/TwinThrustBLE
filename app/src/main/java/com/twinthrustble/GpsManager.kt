@@ -359,6 +359,34 @@ class GpsManager(private val context: Context) {
 
     // ── CSV Logging ───────────────────────────────────────────────────────────
 
+    /**
+     * Telemetry snapshot from BLE — updated whenever duty or current changes.
+     * Merged into each GPS log row so every row captures the latest motor state.
+     *
+     * dutyM1..M6  : raw PWM duty sent to each motor
+     * portAmps    : current in amps from Port BLE module (CC6903, 0 = not reported)
+     * stbdAmps    : current from Starboard module
+     * frontAmps   : current from Front module
+     * powerWatts  : estimated total power = 51.2V × (portAmps + stbdAmps + frontAmps)
+     */
+    data class TelemetrySnapshot(
+        val dutyM1:    Int   = 0,
+        val dutyM2:    Int   = 0,
+        val dutyM3:    Int   = 0,
+        val dutyM4:    Int   = 0,
+        val dutyM5:    Int   = 0,
+        val dutyM6:    Int   = 0,
+        val portAmps:  Float = 0f,
+        val stbdAmps:  Float = 0f,
+        val frontAmps: Float = 0f,
+        val powerWatts: Float = 0f
+    )
+
+    @Volatile private var telemetry = TelemetrySnapshot()
+
+    /** Called from ControlActivity on every thrust change or feedback event. */
+    fun updateTelemetry(snapshot: TelemetrySnapshot) { telemetry = snapshot }
+
     private var logWriter: PrintWriter? = null
     private var logFile:   File?        = null
     var isLogging: Boolean = false
@@ -371,9 +399,13 @@ class GpsManager(private val context: Context) {
         return try {
             val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
             dir.mkdirs()
-            logFile   = File(dir, "ESC_BLE_GPS_${fileNameFmt.format(Date())}.csv")
+            logFile   = File(dir, "TwinThrustBLE_${fileNameFmt.format(Date())}.csv")
             logWriter = PrintWriter(FileWriter(logFile!!, false))
-            logWriter!!.println("timestamp,source,lat,lon,speedKt,headingDeg,altM,satellites,hasFix,headingConf")
+            logWriter!!.println(
+                "timestamp,source,lat,lon,speedKt,headingDeg,altM,satellites,hasFix,headingConf," +
+                        "dutyM1,dutyM2,dutyM3,dutyM4,dutyM5,dutyM6," +
+                        "portAmps,stbdAmps,frontAmps,powerW"
+            )
             logWriter!!.flush()
             isLogging = true
             logFile!!.absolutePath
@@ -389,13 +421,17 @@ class GpsManager(private val context: Context) {
 
     private fun logData(data: GpsData) {
         if (!isLogging || logWriter == null) return
+        val t = telemetry  // snapshot once
         try {
             logWriter!!.println(
                 "${logDateFmt.format(Date())},${data.source}," +
                         "${"%.8f".format(data.latDeg)},${"%.8f".format(data.lonDeg)}," +
                         "${"%.2f".format(data.speedKnots)},${"%.1f".format(data.headingDeg)}," +
                         "${"%.1f".format(data.altitudeM)},${data.satellites},${data.hasFix}," +
-                        "${"%.2f".format(data.headingConfidence)}"
+                        "${"%.2f".format(data.headingConfidence)}," +
+                        "${t.dutyM1},${t.dutyM2},${t.dutyM3},${t.dutyM4},${t.dutyM5},${t.dutyM6}," +
+                        "${"%.3f".format(t.portAmps)},${"%.3f".format(t.stbdAmps)},${"%.3f".format(t.frontAmps)}," +
+                        "${"%.1f".format(t.powerWatts)}"
             )
             logWriter!!.flush()
         } catch (e: Exception) { Log.e(TAG, "Log write: ${e.message}") }
